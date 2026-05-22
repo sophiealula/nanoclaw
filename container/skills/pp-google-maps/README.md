@@ -28,9 +28,40 @@ Pure SKILL.md skill, no new binary. The in-container Claude drives Google Maps v
 |---|---|
 | In-container skill | `/home/node/.claude/skills/pp-google-maps/SKILL.md` (synced from this dir) |
 | Auth state (host) | `~/Library/Application Support/nanoclaw/google-maps/state.json` |
-| Auth state (container) | `/home/node/.config/google-maps/state.json` (read-write mount) |
+| Auth state (container) | `/home/node/.config/google-maps/state.json` (read-only mount) |
 | Login script | `scripts/login.sh` (runs on host, headed Chromium) |
-| Container mount wired in | [`src/container-runner.ts`](../../../src/container-runner.ts) (`googleMapsHostDir`) |
+| Container mount | snippet below (apply to `src/container-runner.ts`) |
+
+## Container mount snippet
+
+The mount edit is tracked separately from this skill commit because it touches `src/container-runner.ts`, which often has other in-progress changes. Apply this snippet to that file when you're ready:
+
+```typescript
+// Inside buildVolumeMounts(), near where other Application Support paths are declared:
+const googleMapsHostDir = path.join(
+  homeDir,
+  'Library',
+  'Application Support',
+  'nanoclaw',
+  'google-maps',
+);
+
+// Inside the same function, near other existence-gated mount pushes (right
+// next to the instacart and amazon-pp-cli mounts is the natural neighbor):
+if (
+  fs.existsSync(googleMapsHostDir) &&
+  fs.existsSync(path.join(googleMapsHostDir, 'state.json'))
+) {
+  mounts.push({
+    hostPath: googleMapsHostDir,
+    containerPath: '/home/node/.config/google-maps',
+    readonly: true, // host login script is the only writer; read-only prevents
+                    // Playwright from silently mutating state during navigation
+  });
+}
+```
+
+Dependencies: `homeDir` (`process.env.HOME || '/root'`), `path`, `fs`, and the `mounts` array — all already in scope in `buildVolumeMounts()` if any of the sibling skills (instacart, amazon-pp-cli) are wired in.
 
 ## One-time setup
 
