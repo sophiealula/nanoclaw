@@ -1,7 +1,7 @@
 ---
 name: pp-google-maps
 description: Save a place to a Google Maps city list when Soph forwards a recommendation. Use whenever a message reads as a place rec (e.g. "Chloe rec'd Bar Tatu in Mexico City", "save Loulou in Brighton, Eden told me about it", "add the taco place in CDMX"). Drives Google Maps web UI via `agent-browser` using a pre-saved Playwright auth state. Always confirms with Soph before writing — Maps account is live external state.
-allowed-tools: Bash(agent-browser:*), Bash(jq:*), Bash(cat:*), Bash(test:*), Bash(ls:*), Bash(echo:*), Read, mcp__nanoclaw__send_message
+allowed-tools: Bash(agent-browser:*), Bash(jq:*), Bash(cat:*), Bash(test:*), Bash(ls:*), Bash(echo:*), Bash(date:*), Bash(rm:*), Bash(mkdir:*), Read, Write, mcp__nanoclaw__send_message
 ---
 
 # pp-google-maps — save places to Google Maps city lists
@@ -53,30 +53,56 @@ Do NOT guess the city from the place name alone. Bar Tatu exists in Mexico City 
 
 Soph maintains a logged-in Playwright session for her **personal** Google account.
 
-- Container path: `/home/node/.config/google-maps/state.json`
+- Container path: `/home/node/.config/google-maps/state.json` (mounted read-only)
 - Host path (mounted from): `~/Library/Application Support/nanoclaw/google-maps/state.json`
+
+## Canonical command form
+
+Every `agent-browser` invocation in this skill MUST pass the state file via the `--state` global flag (or `AGENT_BROWSER_STATE` env var). Standalone `agent-browser state load <path>` does NOT bind the file to the next `open` — the spawned browser context will be unauthenticated and the auth check below will false-flag as "session expired."
+
+Set this at the start of the skill run and reuse on every command:
+
+```bash
+export GMAPS_STATE=/home/node/.config/google-maps/state.json
+```
+
+Then use `agent-browser --state "$GMAPS_STATE" <subcommand>` everywhere.
 
 ## Pre-flight every run
 
-1. Check the state file exists:
+1. **Check the state file exists.**
    ```bash
-   test -f /home/node/.config/google-maps/state.json || {
+   test -f "$GMAPS_STATE" || {
      # Tell Soph and stop
      echo "Google Maps auth state missing — run the host login script before I can save places."
      exit 1
    }
    ```
-2. Load state into agent-browser:
+2. **Open Maps with state loaded.**
    ```bash
-   agent-browser state load /home/node/.config/google-maps/state.json
-   ```
-3. Open Maps and verify auth:
-   ```bash
-   agent-browser open "https://www.google.com/maps"
+   agent-browser --state "$GMAPS_STATE" open "https://www.google.com/maps"
    agent-browser wait --load networkidle
+   ```
+3. **Verify auth — URL check.**
+   ```bash
    agent-browser eval "location.pathname"
    ```
-   - If the URL contains `/signin`, `/accounts.google.com`, or the page asks Soph to sign in → **STOP**. Reply: `"Google Maps session expired — re-auth on your laptop before I can save the place."` Do NOT attempt to log in from inside the container.
+   - If the URL contains `/signin`, `/accounts.google.com`, or any redirect away from `/maps` → **STOP**. Reply: `"Google Maps session expired — re-auth on your laptop before I can save the place."` Do NOT attempt to log in from inside the container.
+
+4. **Verify auth — signed-in chrome.** Maps can load the homepage anonymously without redirecting to `/signin`, so URL alone is not enough.
+   ```bash
+   agent-browser eval "document.querySelector('a[aria-label*=\"Google Account\"], a[aria-label*=\"account\"]')?.getAttribute('aria-label') || ''"
+   ```
+   - Empty string → no account chip visible → treat as logged-out, abort with the same "session expired" message.
+
+5. **Verify auth — correct account.** Soph has two Google accounts and the saved state must belong to the **personal** one, not `sophie@2389.ai`.
+   ```bash
+   agent-browser eval "document.querySelector('a[aria-label*=\"Google Account\"], a[aria-label*=\"account\"]')?.getAttribute('aria-label') || ''"
+   ```
+   - Returned label contains `2389.ai` or anything matching `/@2389\.ai|sophie@2389/i` → **STOP**. Reply: `"Maps is on the work account (2389.ai), not personal — switch on your laptop and re-save state."` Do NOT switch accounts from inside the container.
+   - Returned label matches the personal account (gmail.com address Soph expects) → proceed.
+
+If any pre-flight step fails, do NOT attempt to recover. End the turn with the relevant error message. Soph re-runs the host login script.
 
 ---
 
@@ -86,10 +112,10 @@ Soph maintains a logged-in Playwright session for her **personal** Google accoun
 
 ## Recap format
 
-After identifying place + city + comment, search Maps to verify the place exists and disambiguate. Then send Soph this recap via `mcp__nanoclaw__send_message`:
+After identifying place + city + comment, search Maps to verify the place exists and disambiguate. Capture the full address from the snapshot (not just the neighborhood — protects against same-name-different-location matches). Then send Soph this recap via `mcp__nanoclaw__send_message`:
 
 ```
-Found <Place Name> (<neighborhood>, <city>).
+Found <Place Name> — <full street address>.
 <List status: existing list "X" OR new list "X" will be created>
 Note to attach: "<comment>"
 
@@ -99,20 +125,40 @@ Reply `yes` to save, or `no` to drop.
 Example:
 
 ```
-Found Bar Tatu (Roma Norte, Ciudad de México).
+Found Bar Tatu — Calle Frontera 122, Roma Norte, Ciudad de México.
 Existing list: "Mexico City" (currently 47 places)
 Note to attach: "Chloe recommended this"
 
 Reply `yes` to save, or `no` to drop.
 ```
 
+## Pending file (cross-turn state)
+
+Before ending Turn 1, write the recap state to disk so Turn 2 doesn't depend on transcript memory alone:
+
+```bash
+cat > /workspace/group/.gmaps-pending.json <<EOF
+{
+  "created_at": "<ISO 8601 now>",
+  "place_name": "<Place Name>",
+  "place_url": "<canonical Maps URL>",
+  "place_address": "<full address>",
+  "city": "<city as Soph wrote it>",
+  "list_name": "<city — same string>",
+  "list_exists": true|false,
+  "comment": "<note text>"
+}
+EOF
+```
+
 **End the turn here.** Do NOT proceed to the save click. Wait for Soph's next message.
 
 ## When Soph replies
 
-- `yes` (or `y` / `yeah` / `go`) → proceed to Section 6 (Save flow).
-- `no` (or `n` / `cancel`) → reply `"Dropped."` and stop.
-- Anything else → treat as a clarification, re-run the recap if anything changed.
+- `yes` (or `y` / `yeah` / `go`) → read `.gmaps-pending.json`, proceed to Section 6 (Save flow), delete the pending file on success.
+- `no` (or `n` / `cancel`) → delete `.gmaps-pending.json`, reply `"Dropped."` and stop.
+- Anything else → treat as a clarification. If the place/city/comment changes, re-run the recap and rewrite the pending file.
+- **Pending file > 10 min old** when Soph replies → expire it. Reply: `"Recap expired — send the rec again if you still want to save it."` Delete the file.
 
 ---
 
@@ -121,7 +167,7 @@ Reply `yes` to save, or `no` to drop.
 After auth pre-flight, search Maps:
 
 ```bash
-agent-browser open "https://www.google.com/maps/search/<urlencoded query>"
+agent-browser --state "$GMAPS_STATE" open "https://www.google.com/maps/search/<urlencoded query>"
 agent-browser wait --load networkidle
 agent-browser snapshot -i
 ```
@@ -132,13 +178,18 @@ Where `<query>` is `<place name> <city>`. Reading the snapshot:
 - **Multiple results matching place name across different cities** → ask Soph which city she meant.
 - **No close matches** → reply: `"Couldn't find a '<place>' in <city> on Maps — got a different spelling or a Maps share link?"` and stop.
 
-For the verified place, click into its page so you have a stable URL to return to during the save flow:
+For the verified place, click into its page so you have a stable URL AND can read the full address:
 
 ```bash
 agent-browser find text "<Place Name>" click
 agent-browser wait --load networkidle
-agent-browser get url   # save this for later — the canonical place URL
+agent-browser get url   # canonical place URL → goes in .gmaps-pending.json
+
+# Extract the full address from the place panel (used in the recap)
+agent-browser eval "document.querySelector('button[data-item-id=\"address\"], [data-item-id*=\"address\"]')?.textContent?.trim() || ''"
 ```
+
+If the address eval returns empty, fall back to a snapshot-and-look — the address line is typically near the top of the place panel, prefixed with a location pin icon. Don't proceed to the recap without an address — better to ask Soph "got an address or a Maps link?" than to confirm against just a name.
 
 ---
 
@@ -146,29 +197,49 @@ agent-browser get url   # save this for later — the canonical place URL
 
 Only reached AFTER Soph replies `yes` to the recap.
 
-## 6a — Re-open the place page
+## 6a — Read the pending file + re-open the place
 
-If you navigated away during the recap turn (or this is a fresh container run with state from the pending file), reopen the place via the URL captured in Section 5.
+```bash
+test -f /workspace/group/.gmaps-pending.json || {
+  # No pending state — Soph's "yes" doesn't refer to anything we recapped.
+  # Reply: "No pending save — send the rec again."
+  exit 1
+}
+PENDING=$(cat /workspace/group/.gmaps-pending.json)
+# Parse: place_name, place_url, list_name, list_exists, comment, city
+```
+
+Re-run the pre-flight from Section 3 (state load + auth check), then re-open the place:
+
+```bash
+agent-browser --state "$GMAPS_STATE" open "<place_url from pending>"
+agent-browser wait --load networkidle
+```
 
 ## 6b — Find or create the city list
 
-1. Click the **Save** action on the place page:
+1. Click the **Save** action on the place page. Try the canonical selector first, then fall back to less-specific selectors since Maps A/B-tests Save button presentation:
    ```bash
-   agent-browser find role button click --name "Save"
+   # Primary
+   agent-browser find role button click --name "Save" || \
+     agent-browser find label "Save" click || \
+     agent-browser find text "Save" click
    agent-browser snapshot -i
    ```
-2. A list-picker UI appears. Read the snapshot — does a list named exactly like the city already exist?
-   - **Yes** → click that list. Done with list selection.
-   - **No** → click `New list` (or `Create list` depending on UI), enter the city name as Soph wrote it (preserving `Mexico City` — do NOT auto-shorten to `CDMX`), set visibility to **Private**, click Create.
+   If all three fail, abort: see Section 8 row "List-picker UI doesn't appear."
+2. A list-picker UI appears. Read the snapshot. List matching is **case-insensitive** when finding existing lists (avoids creating duplicate `Brighton` / `brighton`), but **exact-case as Soph wrote it** when creating new lists.
+   - **Existing list (case-insensitive match)** → click it. Done with list selection.
+   - **No match** → click `New list` (or `Create list` depending on UI), enter the city name as Soph wrote it (preserving `Mexico City` — do NOT auto-shorten to `CDMX`), set visibility to **Private**, click Create.
 
 ## 6c — Attach the note
 
 After the place is saved to the list:
 
-1. Open the saved place's note field (UI varies — usually a `Add a note` link in the list-picker, or via the saved-list view).
+1. Open the saved place's note field. UI varies — look for a textarea/button matching `/note/i` (Maps labels it `Note` or `Add a note` depending on entry path).
 2. Fill in the comment text exactly as recapped to Soph:
    ```bash
-   agent-browser find role textbox fill "<comment>"
+   agent-browser find role textbox fill "<comment>" || \
+     agent-browser find label --regex "note" fill "<comment>"
    agent-browser find role button click --name "Save"
    ```
 
@@ -180,7 +251,13 @@ agent-browser snapshot -i
 
 Confirm the place card shows "Saved to <list name>" and the note is attached. If verification fails, see Section 8.
 
-## 6e — Reply to Soph
+## 6e — Clean up pending + reply
+
+```bash
+rm -f /workspace/group/.gmaps-pending.json
+```
+
+Reply to Soph:
 
 ```
 Saved <Place Name> to <list name>. Note: "<comment>"
@@ -210,11 +287,15 @@ Created new list <list name> and saved <Place Name>. Note: "<comment>"
 | Failure | Action |
 |---|---|
 | State file missing | Reply: `"Auth state missing — run the host login script."` |
-| Login wall on first navigation | Reply: `"Maps session expired — re-auth on your laptop."` |
-| Wrong account active | Reply: `"Maps is on <account> not personal — switch on your laptop and re-save state."` |
+| Login wall on first navigation (URL redirects to /signin) | Reply: `"Maps session expired — re-auth on your laptop."` |
+| Anonymous homepage (no account chip in DOM, URL looks normal) | Treat as logged-out. Reply: `"Maps loaded anonymously — auth state likely expired. Re-auth on your laptop."` |
+| Wrong account active (chip aria-label contains `2389.ai`) | Reply: `"Maps is on the work account, not personal — switch on your laptop and re-save state."` |
+| CAPTCHA / "unusual activity" challenge mid-flow | Snapshot, screenshot to `/workspace/group/.gmaps-debug-$(date +%s).png`, reply: `"Maps hit a CAPTCHA challenge. Screenshot saved. Re-run the host login ceremony to refresh trust."` |
 | Place not found after search | Reply: `"Couldn't find '<place>' in <city>. Spelling, or got a Maps share link?"` |
-| List-picker UI doesn't appear after Save click (selector drift) | Snapshot, screenshot to `/workspace/group/.gmaps-debug-<timestamp>.png`, reply: `"Maps UI shifted — couldn't find the list picker. Screenshot saved. Try saving manually for now."` |
+| Address eval returns empty | Reply: `"Found a place card but couldn't read the address — got a Maps share link or the full address?"` |
+| List-picker UI doesn't appear after Save click (selector drift) — all three Save-button selectors failed | Snapshot, screenshot to `/workspace/group/.gmaps-debug-$(date +%s).png`, reply: `"Maps UI shifted — couldn't find the Save button. Screenshot saved. Save manually for now."` |
 | Note field not found | Save the place to the list anyway (better than losing the save), then reply: `"Saved to <list>, but couldn't attach the note via UI. Note: '<comment>' — add manually if you want it on the pin."` |
+| Pending file > 10 min old when Soph replies `yes` | Reply: `"Recap expired — send the rec again if you still want to save it."` Delete the pending file. |
 | Soph's confirmation is unclear | Re-recap. Do not write. |
 
 ---
