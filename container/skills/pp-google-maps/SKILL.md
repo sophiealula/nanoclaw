@@ -107,47 +107,76 @@ If any pre-flight step fails, do NOT attempt to recover from inside the containe
 
 After identifying place + city + comment, search Maps to verify the place exists and disambiguate. Capture the full address from the snapshot (not just the neighborhood — protects against same-name-different-location matches). Then send Soph a single-line recap via `mcp__nanoclaw__send_message`:
 
+**Single place** (most common):
 ```
 Save <Place Name> (<neighborhood>, <city>) to <list status> w/ note "<comment>"? yes/no
 ```
 
-Where `<list status>` is either `your Mexico City list` (existing) or `a new Mexico City list` (creating). Example:
+**Batch (N places to same list — handles back-to-back recs in one message):**
+```
+Save these N places to <list status>? yes/no
+1. <Place 1 Name> (<neighborhood>) — "<note 1>"
+2. <Place 2 Name> (<neighborhood>) — "<note 2>"
+…
+```
+
+Where `<list status>` is either `your Mexico City list` (existing) or `a new Mexico City list` (creating). Examples:
 
 ```
 Save Bar Tatu (Roma Norte, CDMX) to your Mexico City list w/ note "Chloe rec'd this"? yes/no
 ```
 
-Keep it terse — Soph reads this on her phone, often mid-conversation. Long multi-line recaps don't fit a glance.
+```
+Save these 4 places to your San Diego list? yes/no
+1. Puesto La Jolla (Wall St) — "Kari rec'd, good to walk to"
+2. Georges at the Cove (Prospect St) — "Kari rec'd, outdoor bar"
+3. The Cottage La Jolla (Fay Ave) — "Kari rec'd, best breakfast/lunch"
+4. Pavilions (Girard Ave) — "Kari rec'd, grocery store — same as Jewel"
+```
 
-## Pending file (cross-turn state)
+Keep it terse — Soph reads this on her phone, often mid-conversation.
 
-Before ending Turn 1, write the recap state to disk in a private subdir (other skills can't read it). Use `jq` to build JSON safely so embedded quotes don't break parsing:
+## Pending file (cross-turn state) — **MANDATORY**
+
+**Hard rule:** Before ending Turn 1, you MUST write `pending.json`. The recap-without-pending-file is a bug — Soph's `yes` will refer to nothing on disk and the saves get lost. (This bug lost the Puesto/Georges/Cottage/Pavilions batch on 2026-05-22.)
+
+The schema is an **array of items**, even for a single place. Use `jq` to build JSON safely so embedded quotes don't break parsing:
 
 ```bash
 mkdir -p /workspace/group/.private/pp-google-maps
+
+# Build the items array. For each place collected in Section 5, append an object.
+# Example for N=4. For N=1, the array just has one item.
+ITEMS=$(jq -n \
+  --arg n1 "Puesto La Jolla" --arg u1 "$URL1" --arg c1 "$CID1" --arg a1 "$ADDRESS1" --arg note1 "Kari rec'd, good to walk to" \
+  --arg n2 "Georges at the Cove" --arg u2 "$URL2" --arg c2 "$CID2" --arg a2 "$ADDRESS2" --arg note2 "Kari rec'd, outdoor bar" \
+  --arg n3 "The Cottage La Jolla" --arg u3 "$URL3" --arg c3 "$CID3" --arg a3 "$ADDRESS3" --arg note3 "Kari rec'd, best breakfast/lunch" \
+  --arg n4 "Pavilions" --arg u4 "$URL4" --arg c4 "$CID4" --arg a4 "$ADDRESS4" --arg note4 "Kari rec'd, grocery store — same as Jewel" \
+  '[
+    {place_name: $n1, place_url: $u1, place_cid: $c1, place_address: $a1, note: $note1},
+    {place_name: $n2, place_url: $u2, place_cid: $c2, place_address: $a2, note: $note2},
+    {place_name: $n3, place_url: $u3, place_cid: $c3, place_address: $a3, note: $note3},
+    {place_name: $n4, place_url: $u4, place_cid: $c4, place_address: $a4, note: $note4}
+  ]')
+
 jq -n \
   --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg place_name "<Place Name>" \
-  --arg place_url "$URL" \
-  --arg place_cid "$CID" \
-  --arg place_address "$ADDRESS" \
   --arg city "<city as Soph wrote it>" \
   --arg list_name "<city — same string>" \
   --argjson list_exists "true" \
-  --arg comment "<note text>" \
-  '{created_at: $created_at, place_name: $place_name, place_url: $place_url,
-    place_cid: $place_cid, place_address: $place_address, city: $city,
-    list_name: $list_name, list_exists: $list_exists, comment: $comment}' \
+  --argjson items "$ITEMS" \
+  '{created_at: $created_at, city: $city, list_name: $list_name,
+    list_exists: $list_exists, items: $items}' \
   > /workspace/group/.private/pp-google-maps/pending.json
 ```
 
-`place_cid` is the fallback if `place_url` 404s on Turn 2. Identity tuple `(place_name, place_address, city)` is the last-resort re-search fallback.
+`place_cid` per item is the fallback if `place_url` 404s on Turn 2. Identity tuple `(place_name, place_address, city)` per item is the last-resort re-search fallback.
 
 (`list_exists` is `"true"` or `"false"` for `--argjson` — both are valid JSON literals.)
 
-Race-condition note: there's one pending file per group. If Soph sends a second distinct rec before replying `yes` to the first, the second recap overwrites the first. Section 4's clarification rule handles same-place tweaks; for back-to-back distinct recs, the second recap silently invalidates the first. This is acceptable for personal use — the recap itself is ephemeral and Soph can resend.
+Race-condition note: one pending file per group. If Soph sends a second distinct rec batch before replying `yes` to the first, the second recap overwrites the first. Acceptable for personal use — Soph can resend.
 
-**End the turn here.** Do NOT proceed to the save click. Wait for Soph's next message.
+**End the turn here. The pending.json must be on disk. Verify with `test -f /workspace/group/.private/pp-google-maps/pending.json` before sending the recap.** Do NOT proceed to the save click. Wait for Soph's next message.
 
 ## When Soph replies
 
@@ -200,7 +229,7 @@ If `$ADDRESS` is empty, fall back to a snapshot-and-look — the address line is
 
 Only reached AFTER Soph replies `yes` to the recap.
 
-## 6a — Read the pending file + re-open the place
+## 6a — Read the pending file + iterate items
 
 ```bash
 PENDING=/workspace/group/.private/pp-google-maps/pending.json
@@ -209,14 +238,32 @@ test -f "$PENDING" || {
   # Reply: "Nothing pending — send the rec again."
   exit 1
 }
-PLACE_URL=$(jq -r .place_url "$PENDING")
-PLACE_CID=$(jq -r .place_cid "$PENDING")
-PLACE_NAME=$(jq -r .place_name "$PENDING")
-PLACE_ADDRESS=$(jq -r .place_address "$PENDING")
 CITY=$(jq -r .city "$PENDING")
 LIST_NAME=$(jq -r .list_name "$PENDING")
-COMMENT=$(jq -r .comment "$PENDING")
+LIST_EXISTS=$(jq -r .list_exists "$PENDING")
+ITEM_COUNT=$(jq '.items | length' "$PENDING")
 ```
+
+The save flow below runs ONCE per item. Iterate `0` through `ITEM_COUNT-1`. Per item:
+
+```bash
+for i in $(seq 0 $((ITEM_COUNT - 1))); do
+  PLACE_URL=$(jq -r ".items[$i].place_url" "$PENDING")
+  PLACE_CID=$(jq -r ".items[$i].place_cid" "$PENDING")
+  PLACE_NAME=$(jq -r ".items[$i].place_name" "$PENDING")
+  PLACE_ADDRESS=$(jq -r ".items[$i].place_address" "$PENDING")
+  COMMENT=$(jq -r ".items[$i].note" "$PENDING")
+  # ... do the Section 6b/6c/6d save for this item ...
+done
+```
+
+**Batch semantics:**
+- The list is created ONCE (first item that triggers list-not-found path). Subsequent items add to the now-existing list.
+- One `yes` covers all items. No per-item confirmation.
+- If item N fails (address mismatch, save not landing, etc.) → STOP the batch, report which items succeeded and which didn't. Do NOT retry within the batch.
+- If item N is already saved (idempotency check returns `saved` in 6b step 1) → skip it, continue to N+1, mention in the final summary.
+
+The Section 3 pre-flight runs ONCE at the start, before the loop.
 
 Re-run the pre-flight from Section 3 (state load + auth check), then re-open the place with fallback. The original URL is the fast path; CID and name-search are progressively-more-resilient fallbacks for the case where Maps' session-bound URL segments have rotated:
 
@@ -320,7 +367,7 @@ If `$SAVE_STATE` is still `unsaved`, the dialog committed without binding to a l
 rm -f /workspace/group/.private/pp-google-maps/pending.json
 ```
 
-Reply to Soph:
+**Single-item reply:**
 
 ```
 Saved <Place Name> to <list name>. Note: "<comment>"
@@ -331,6 +378,30 @@ Or if a new list was created:
 ```
 Created new list <list name> and saved <Place Name>. Note: "<comment>"
 ```
+
+**Batch reply (N > 1):** report each item's outcome in order. Use ✅ for saved, ⏭ for already-saved (idempotency skip), ❌ for failed.
+
+```
+Saved <N>/<TOTAL> to <list name>:
+✅ Puesto La Jolla — "Kari rec'd, good to walk to"
+✅ Georges at the Cove — "Kari rec'd, outdoor bar"
+⏭ The Cottage La Jolla — already on the list
+❌ Pavilions — address mismatch on re-open; not saved
+```
+
+If the batch was fully successful (all ✅), shorten to:
+
+```
+Saved all 4 to your San Diego list ✓
+```
+
+If the batch was fully failed at item 1 (couldn't create list, auth wall, etc.), say so explicitly:
+
+```
+Couldn't save any of the 4 — <reason>. Pending file kept; try again or say `cancel`.
+```
+
+(In the all-fail case, do NOT delete the pending file — Soph can retry.)
 
 ---
 

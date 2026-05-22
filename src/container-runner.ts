@@ -16,13 +16,14 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  bindMountArgs,
   CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
   hostGatewayArgs,
-  readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
@@ -64,6 +65,44 @@ function buildVolumeMounts(
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
+  const homeDir = process.env.HOME || '/root';
+  const gsuiteCfgDir = path.join(homeDir, '.config', 'gsuite-mcp');
+  const gsuiteDataDir = path.join(homeDir, '.local', 'share', 'gsuite-mcp');
+  const msgvaultDir = path.join(homeDir, '.msgvault');
+  // instacart-pp-cli stores config + history DB in macOS Application Support;
+  // Linux container expects it under XDG ($HOME/.config/instacart).
+  const instacartHostDir = path.join(
+    homeDir,
+    'Library',
+    'Application Support',
+    'instacart',
+  );
+  // amazon-pp-cli mirrors the instacart pattern: macOS Application Support on host,
+  // XDG ($HOME/.config/amazon-pp-cli) inside the Linux container.
+  const amazonHostDir = path.join(
+    homeDir,
+    'Library',
+    'Application Support',
+    'amazon-pp-cli',
+  );
+  // pp-google-maps stores the Playwright auth state for Soph's personal
+  // Google account. The skill (SKILL.md) drives Maps via agent-browser using
+  // this state. Refreshed by the host-side login ceremony in
+  // container/skills/pp-google-maps/scripts/login.sh.
+  const googleMapsHostDir = path.join(
+    homeDir,
+    'Library',
+    'Application Support',
+    'nanoclaw',
+    'google-maps',
+  );
+  // Sophie's taste profile docs — feeds the taste-aware-event-scout skill.
+  const tasteProfileDir = path.join(
+    homeDir,
+    'projects',
+    'personal',
+    'taste-profile',
+  );
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
@@ -132,6 +171,8 @@ function buildVolumeMounts(
             // https://code.claude.com/docs/en/memory#manage-auto-memory
             CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
           },
+          // Auto-approve MCP servers from project .mcp.json (gsuite, etc.)
+          enableAllProjectMcpServers: true,
         },
         null,
         2,
@@ -139,7 +180,85 @@ function buildVolumeMounts(
     );
   }
 
-  // Sync skills from container/skills/ into each group's .claude/skills/
+  // Write .mcp.json for MCP servers available inside the container
+  // Must be in the group dir (container cwd = /workspace/group/) so Claude Code finds it
+  const mcpFile = path.join(groupDir, '.mcp.json');
+  const mcpConfig: Record<string, unknown> = {};
+  // GSuite MCP servers (if credentials are mounted)
+  // Single GSuite MCP server with multi-account support.
+  // Tools accept an `account` parameter (e.g. "default" or "personal").
+  // accounts.json maps aliases to container token paths.
+  if (fs.existsSync(gsuiteCfgDir) && fs.existsSync(gsuiteDataDir)) {
+    const gsuiteConfigCopy = path.join(
+      DATA_DIR,
+      'sessions',
+      group.folder,
+      'gsuite-config',
+    );
+
+    // Write container-compatible accounts.json
+    const containerAccounts: {
+      default: string;
+      accounts: Record<string, { token_path: string }>;
+    } = {
+      default: 'default',
+      accounts: {
+        default: {
+          token_path: '/home/node/.local/share/gsuite-mcp/token.json',
+        },
+      },
+    };
+    const tokensDir = path.join(gsuiteDataDir, 'tokens');
+    if (fs.existsSync(tokensDir)) {
+      for (const file of fs.readdirSync(tokensDir)) {
+        const account = file.replace(/\.json$/, '');
+        containerAccounts.accounts[account] = {
+          token_path: `/home/node/.local/share/gsuite-mcp/tokens/${file}`,
+        };
+      }
+    }
+    fs.mkdirSync(gsuiteConfigCopy, { recursive: true });
+    fs.writeFileSync(
+      path.join(gsuiteConfigCopy, 'accounts.json'),
+      JSON.stringify(containerAccounts, null, 2) + '\n',
+    );
+
+    // Copy credentials.json
+    const credsSrc = path.join(gsuiteCfgDir, 'credentials.json');
+    const credsDst = path.join(gsuiteConfigCopy, 'credentials.json');
+    if (fs.existsSync(credsSrc)) {
+      fs.copyFileSync(credsSrc, credsDst);
+    }
+
+    mcpConfig['gsuite'] = {
+      command: '/usr/local/bin/gsuite-mcp',
+      args: ['mcp'],
+    };
+  }
+  // msgvault MCP server (email/iMessage archive search)
+  if (
+    fs.existsSync(msgvaultDir) &&
+    fs.existsSync(path.join(msgvaultDir, 'msgvault.db'))
+  ) {
+    mcpConfig['msgvault'] = {
+      command: '/usr/local/bin/msgvault',
+      args: ['mcp'],
+    };
+  }
+  if (Object.keys(mcpConfig).length > 0) {
+    fs.writeFileSync(
+      mcpFile,
+      JSON.stringify({ mcpServers: mcpConfig }, null, 2) + '\n',
+    );
+  }
+
+  // Sync skills from container/skills/ into each group's .claude/skills/.
+  // preserveTimestamps is LOAD-BEARING: without it, every container start
+  // rewrites all SKILL.md mtimes to "now", which makes agent-runner's
+  // skill-changed-since-session-start check trigger spuriously and silently
+  // drop the session. That manifests as "the agent forgot what we were
+  // talking about" after a container restart. (Bug found 2026-05-22 during
+  // the pp-google-maps batch-save investigation.)
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   if (fs.existsSync(skillsSrc)) {
@@ -147,7 +266,7 @@ function buildVolumeMounts(
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
+      fs.cpSync(srcDir, dstDir, { recursive: true, preserveTimestamps: true });
     }
   }
   mounts.push({
@@ -184,13 +303,23 @@ function buildVolumeMounts(
     'agent-runner-src',
   );
   if (fs.existsSync(agentRunnerSrc)) {
-    const srcIndex = path.join(agentRunnerSrc, 'index.ts');
-    const cachedIndex = path.join(groupAgentRunnerDir, 'index.ts');
+    // Check freshness by comparing the MAX mtime across ALL files in src to
+    // the cached copy. The previous version only checked index.ts, which meant
+    // edits to sibling files (e.g. ipc-mcp-stdio.ts) didn't invalidate the
+    // cache and containers ran stale code — caused a same-orphan surrogate
+    // 400 to recur in 2026-05-16 after the safeSlice fix had been "deployed."
+    const maxMtime = (dir: string): number => {
+      let max = 0;
+      for (const name of fs.readdirSync(dir)) {
+        const stat = fs.statSync(path.join(dir, name));
+        if (stat.isFile() && stat.mtimeMs > max) max = stat.mtimeMs;
+      }
+      return max;
+    };
     const needsCopy =
       !fs.existsSync(groupAgentRunnerDir) ||
-      !fs.existsSync(cachedIndex) ||
-      (fs.existsSync(srcIndex) &&
-        fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
+      fs.readdirSync(groupAgentRunnerDir).length === 0 ||
+      maxMtime(agentRunnerSrc) > maxMtime(groupAgentRunnerDir);
     if (needsCopy) {
       fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
     }
@@ -200,6 +329,99 @@ function buildVolumeMounts(
     containerPath: '/app/src',
     readonly: false,
   });
+
+  // Mount GSuite MCP credentials so container agent can access Gmail/Calendar.
+  // Config (accounts.json + credentials.json) is prepared in the .mcp.json section above.
+  // Data dir (tokens) is mounted read-only.
+  if (fs.existsSync(gsuiteCfgDir) && fs.existsSync(gsuiteDataDir)) {
+    const gsuiteConfigCopy = path.join(
+      DATA_DIR,
+      'sessions',
+      group.folder,
+      'gsuite-config',
+    );
+    mounts.push({
+      hostPath: gsuiteConfigCopy,
+      containerPath: '/home/node/.config/gsuite-mcp',
+      readonly: true,
+    });
+    mounts.push({
+      hostPath: gsuiteDataDir,
+      containerPath: '/home/node/.local/share/gsuite-mcp',
+      readonly: true,
+    });
+  }
+
+  // Mount msgvault archive (read-only) so container agent can search email/iMessage history
+  if (
+    fs.existsSync(msgvaultDir) &&
+    fs.existsSync(path.join(msgvaultDir, 'msgvault.db'))
+  ) {
+    mounts.push({
+      hostPath: msgvaultDir,
+      containerPath: '/home/node/.msgvault',
+      readonly: true,
+    });
+  }
+
+  // Mount Sophie's taste profile docs read-write so the taste-aware-event-scout
+  // skill can read taste.md / music-events.md / restaurants.md AND append
+  // captures to additions.md. Skill instruction restricts writes to additions.md.
+  if (
+    fs.existsSync(tasteProfileDir) &&
+    fs.existsSync(path.join(tasteProfileDir, 'taste.md'))
+  ) {
+    mounts.push({
+      hostPath: tasteProfileDir,
+      containerPath: '/workspace/extra/taste-profile',
+      readonly: false,
+    });
+  }
+
+  // Mount instacart-pp-cli state (config + history SQLite + cookies).
+  // Read-write so the agent can both query history and run `add` (which
+  // writes incremental purchase signal back into purchased_items).
+  if (
+    fs.existsSync(instacartHostDir) &&
+    fs.existsSync(path.join(instacartHostDir, 'config.json'))
+  ) {
+    mounts.push({
+      hostPath: instacartHostDir,
+      containerPath: '/home/node/.config/instacart',
+      readonly: false,
+    });
+  }
+
+  // Mount amazon-pp-cli state (per-profile cookies + history DBs). Read-write
+  // for the same reason as instacart: history-first add writes new purchase
+  // signal back into the SQLite store.
+  if (
+    fs.existsSync(amazonHostDir) &&
+    fs.existsSync(path.join(amazonHostDir, 'config.json'))
+  ) {
+    mounts.push({
+      hostPath: amazonHostDir,
+      containerPath: '/home/node/.config/amazon-pp-cli',
+      readonly: false,
+    });
+  }
+
+  // Mount pp-google-maps Playwright auth state read-only. Only the host
+  // login script (container/skills/pp-google-maps/scripts/login.sh) writes
+  // to this path; the in-container skill is forbidden from re-authing
+  // (see Section 7 of SKILL.md), so a read-only mount keeps Playwright
+  // from silently rewriting cookies during navigation and diverging from
+  // the host-saved state.
+  if (
+    fs.existsSync(googleMapsHostDir) &&
+    fs.existsSync(path.join(googleMapsHostDir, 'state.json'))
+  ) {
+    mounts.push({
+      hostPath: googleMapsHostDir,
+      containerPath: '/home/node/.config/google-maps',
+      readonly: true,
+    });
+  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
@@ -219,10 +441,31 @@ function buildContainerArgs(
   containerName: string,
   isMain: boolean,
 ): string[] {
-  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+  const args: string[] = [
+    'run',
+    '-i',
+    '--rm',
+    '--name',
+    containerName,
+    '-m',
+    '2G',
+  ];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Pass optional service API keys for container skills (e.g. podcast synthesis)
+  const serviceEnv = readEnvFile([
+    'ELEVENLABS_API_KEY',
+    'ELEVENLABS_VOICE_ID',
+    'ELEVENLABS_MODEL_ID',
+    'ELEVENLABS_AGENT_ID',
+    'ELEVENLABS_AGENT_PHONE_NUMBER_ID',
+    'TELEGRAM_BOT_TOKEN',
+  ]);
+  for (const [key, value] of Object.entries(serviceEnv)) {
+    args.push('-e', `${key}=${value}`);
+  }
 
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
@@ -262,11 +505,9 @@ function buildContainerArgs(
   }
 
   for (const mount of mounts) {
-    if (mount.readonly) {
-      args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
-    } else {
-      args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
-    }
+    args.push(
+      ...bindMountArgs(mount.hostPath, mount.containerPath, mount.readonly),
+    );
   }
 
   args.push(CONTAINER_IMAGE);
