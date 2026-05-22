@@ -89,7 +89,7 @@ Use the literal path, NOT an env-var indirection — that prevents any prior she
    ```bash
    agent-browser --state /home/node/.config/google-maps/state.json open "https://www.google.com/maps"
    agent-browser wait --load networkidle
-   CHIP=$(agent-browser eval "document.querySelector('a[aria-label*=\"Google Account\"], a[aria-label*=\"account\"]')?.getAttribute('aria-label') || ''")
+   CHIP=$(agent-browser eval "document.querySelector('a[aria-label*=\"Google Account\"], button[aria-label*=\"Google Account\"], a[aria-label*=\"account\"]')?.getAttribute('aria-label') || ''")
    ```
    - `$CHIP` empty → reply: `"Maps loaded logged-out. Run login.sh on your Mac when you're back at it."` STOP.
    - `$CHIP` contains `2389.ai` → reply: `"Maps is on the work account. Switch to personal on your Mac and re-run login.sh."` STOP.
