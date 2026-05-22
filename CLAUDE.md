@@ -43,6 +43,7 @@ Four types of skills exist in NanoClaw. See [CONTRIBUTING.md](CONTRIBUTING.md) f
 | `/init-onecli` | Install OneCLI Agent Vault and migrate `.env` credentials to it |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+| `/add-snack-bot` | Standalone Slack-driven Instacart Costco snack ordering bot (separate Slack app + Instacart session; launchd-managed) |
 
 ## Contributing
 
@@ -78,3 +79,8 @@ systemctl --user restart nanoclaw
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
+
+## Invariants (don't accidentally regress)
+
+- `src/router.ts`'s `<context timezone="..." today="..." />` header includes both attributes. The `today=` attribute (built via `formatTodayInTimezone` in `src/timezone.ts`) is load-bearing — without it the in-container agent computes day-of-week from bare dates and occasionally gets calendar math wrong (e.g., labeling Saturday as Friday). Tests in `src/formatting.test.ts` enforce the format.
+- Mount `containerPath` names in `registered_groups.container_config.additionalMounts` must match the paths each group's `groups/<folder>/CLAUDE.md` instructs the agent to read from (e.g. `vault`, not `obsidian`, for `telegram_main`). A mismatch makes the agent look at a path that doesn't exist and improvise/hallucinate. Run `npx tsx scripts/verify-telegram-mounts.ts` after editing.

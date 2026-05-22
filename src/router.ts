@@ -1,5 +1,5 @@
 import { Channel, NewMessage } from './types.js';
-import { formatLocalTime } from './timezone.js';
+import { formatLocalTime, formatTodayInTimezone } from './timezone.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -19,7 +19,10 @@ export function formatMessages(
     return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
   });
 
-  const header = `<context timezone="${escapeXml(timezone)}" />\n`;
+  // Include today's date + day-of-week explicitly so the agent doesn't have to
+  // compute weekday from a bare date string (which it occasionally gets wrong).
+  const today = formatTodayInTimezone(timezone);
+  const header = `<context timezone="${escapeXml(timezone)}" today="${escapeXml(today)}" />\n`;
 
   return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
 }
