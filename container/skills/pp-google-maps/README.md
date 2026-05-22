@@ -1,8 +1,6 @@
 # pp-google-maps
 
-Save a place to a Google Maps **city list** when Soph forwards a rec from Telegram (or any other channel).
-
-Design doc: [`docs/plans/2026-05-22-pp-google-maps-design.md`](../../../docs/plans/2026-05-22-pp-google-maps-design.md)
+Save a place to a Google Maps **city list** when Soph forwards a rec from Telegram. Only runs in Soph's main DM (group-chat sends would leak the recap publicly).
 
 ## What it does
 
@@ -87,16 +85,14 @@ Google detects pure-Playwright logins and challenges them harder than a real bro
 
 The container then loads that state into a headless run — Google sees an existing logged-in session, no fresh login attempt.
 
-## Test plan (after setup)
+## First run (smoke test)
 
-1. From your main Telegram chat, send: `Chloe rec'd Bar Tatu in Mexico City`
-2. Agent should reply with a recap asking for `yes`/`no`.
+1. From your main Telegram DM, send a clear rec (use a real place + city you know): e.g. `Eden rec'd Loulou in Brighton`
+2. Agent replies with a single-line save request asking `yes/no`.
 3. Reply `yes`.
-4. Open Google Maps on your phone — Bar Tatu should be on your Mexico City list with the note "Chloe recommended this".
-5. Test a new-city flow: `save Loulou in Brighton, Eden told me about it` — agent should propose creating a new "Brighton" list.
-6. Test detection guard: `where should we eat tonight?` — agent should NOT trigger the skill, just chat normally.
+4. Open Google Maps on your phone — the place should be on your Brighton list with the note attached.
 
-If detection misfires (triggers when it shouldn't), tighten the patterns in Section 1 of `SKILL.md`.
+If detection misfires later (triggers on something like "where should we eat?"), tighten the patterns in Section 1 of `SKILL.md`. If the recap never shows up, check that the message came in via your main DM, not a group chat (skill is gated to main).
 
 ## Related
 

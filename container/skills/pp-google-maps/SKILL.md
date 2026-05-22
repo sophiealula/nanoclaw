@@ -14,6 +14,19 @@ Mirrors the `pp-instacart` pattern: agent drives the live web UI via `agent-brow
 
 # Section 1 — When this skill triggers
 
+## DM-only gate (first check, before anything else)
+
+This skill writes place addresses and recommender names back to the originating chat. If triggered from a group chat instead of Soph's main DM, the recap leaks personal data to anyone in that group. Refuse to run anywhere else:
+
+```bash
+[[ "${NANOCLAW_IS_MAIN:-0}" == "1" ]] || {
+  # Reply (in whatever channel triggered it): "Place-save only works in my main DM, not group chats."
+  exit 0
+}
+```
+
+Set `NANOCLAW_IS_MAIN=1` is exported by the container runner for Soph's main DM only.
+
 ## Trigger patterns (be conservative)
 
 Run this skill when an inbound message clearly reads as a place recommendation:
@@ -58,51 +71,31 @@ Soph maintains a logged-in Playwright session for her **personal** Google accoun
 
 ## Canonical command form
 
-Every `agent-browser` invocation in this skill MUST pass the state file via the `--state` global flag (or `AGENT_BROWSER_STATE` env var). Standalone `agent-browser state load <path>` does NOT bind the file to the next `open` — the spawned browser context will be unauthenticated and the auth check below will false-flag as "session expired."
+Every `agent-browser` invocation in this skill MUST pass `--state /home/node/.config/google-maps/state.json` as the global flag. Standalone `agent-browser state load <path>` does NOT bind the file to the next `open` — the spawned browser context will be unauthenticated and the auth check below will false-flag as "session expired."
 
-Set this at the start of the skill run and reuse on every command:
-
-```bash
-export GMAPS_STATE=/home/node/.config/google-maps/state.json
-```
-
-Then use `agent-browser --state "$GMAPS_STATE" <subcommand>` everywhere.
+Use the literal path, NOT an env-var indirection — that prevents any prior shell-injectable text from re-pointing the load at a different file.
 
 ## Pre-flight every run
 
-1. **Check the state file exists.**
+1. **State file must exist.**
    ```bash
-   test -f "$GMAPS_STATE" || {
-     # Tell Soph and stop
-     echo "Google Maps auth state missing — run the host login script before I can save places."
+   test -f /home/node/.config/google-maps/state.json || {
+     # Reply: "Maps auth state missing. Next time you're at your Mac, run
+     # ~/projects/nanoclaw/container/skills/pp-google-maps/scripts/login.sh"
      exit 1
    }
    ```
-2. **Open Maps with state loaded.**
+2. **Open Maps with state loaded, then read the account chip.** Single eval covers both "anonymous load" (empty chip) and "wrong account" (chip contains `2389.ai`).
    ```bash
-   agent-browser --state "$GMAPS_STATE" open "https://www.google.com/maps"
+   agent-browser --state /home/node/.config/google-maps/state.json open "https://www.google.com/maps"
    agent-browser wait --load networkidle
+   CHIP=$(agent-browser eval "document.querySelector('a[aria-label*=\"Google Account\"], a[aria-label*=\"account\"]')?.getAttribute('aria-label') || ''")
    ```
-3. **Verify auth — URL check.**
-   ```bash
-   agent-browser eval "location.pathname"
-   ```
-   - If the URL contains `/signin`, `/accounts.google.com`, or any redirect away from `/maps` → **STOP**. Reply: `"Google Maps session expired — re-auth on your laptop before I can save the place."` Do NOT attempt to log in from inside the container.
+   - `$CHIP` empty → reply: `"Maps loaded logged-out. Run login.sh on your Mac when you're back at it."` STOP.
+   - `$CHIP` contains `2389.ai` → reply: `"Maps is on the work account. Switch to personal on your Mac and re-run login.sh."` STOP.
+   - Otherwise → proceed.
 
-4. **Verify auth — signed-in chrome.** Maps can load the homepage anonymously without redirecting to `/signin`, so URL alone is not enough.
-   ```bash
-   agent-browser eval "document.querySelector('a[aria-label*=\"Google Account\"], a[aria-label*=\"account\"]')?.getAttribute('aria-label') || ''"
-   ```
-   - Empty string → no account chip visible → treat as logged-out, abort with the same "session expired" message.
-
-5. **Verify auth — correct account.** Soph has two Google accounts and the saved state must belong to the **personal** one, not `sophie@2389.ai`.
-   ```bash
-   agent-browser eval "document.querySelector('a[aria-label*=\"Google Account\"], a[aria-label*=\"account\"]')?.getAttribute('aria-label') || ''"
-   ```
-   - Returned label contains `2389.ai` or anything matching `/@2389\.ai|sophie@2389/i` → **STOP**. Reply: `"Maps is on the work account (2389.ai), not personal — switch on your laptop and re-save state."` Do NOT switch accounts from inside the container.
-   - Returned label matches the personal account (gmail.com address Soph expects) → proceed.
-
-If any pre-flight step fails, do NOT attempt to recover. End the turn with the relevant error message. Soph re-runs the host login script.
+If any pre-flight step fails, do NOT attempt to recover from inside the container. Soph re-runs the host login script.
 
 ---
 
@@ -112,31 +105,26 @@ If any pre-flight step fails, do NOT attempt to recover. End the turn with the r
 
 ## Recap format
 
-After identifying place + city + comment, search Maps to verify the place exists and disambiguate. Capture the full address from the snapshot (not just the neighborhood — protects against same-name-different-location matches). Then send Soph this recap via `mcp__nanoclaw__send_message`:
+After identifying place + city + comment, search Maps to verify the place exists and disambiguate. Capture the full address from the snapshot (not just the neighborhood — protects against same-name-different-location matches). Then send Soph a single-line recap via `mcp__nanoclaw__send_message`:
 
 ```
-Found <Place Name> — <full street address>.
-<List status: existing list "X" OR new list "X" will be created>
-Note to attach: "<comment>"
-
-Reply `yes` to save, or `no` to drop.
+Save <Place Name> (<neighborhood>, <city>) to <list status> w/ note "<comment>"? yes/no
 ```
 
-Example:
+Where `<list status>` is either `your Mexico City list` (existing) or `a new Mexico City list` (creating). Example:
 
 ```
-Found Bar Tatu — Calle Frontera 122, Roma Norte, Ciudad de México.
-Existing list: "Mexico City" (currently 47 places)
-Note to attach: "Chloe recommended this"
-
-Reply `yes` to save, or `no` to drop.
+Save Bar Tatu (Roma Norte, CDMX) to your Mexico City list w/ note "Chloe rec'd this"? yes/no
 ```
+
+Keep it terse — Soph reads this on her phone, often mid-conversation. Long multi-line recaps don't fit a glance.
 
 ## Pending file (cross-turn state)
 
-Before ending Turn 1, write the recap state to disk so Turn 2 doesn't depend on transcript memory alone. **Use `jq` to build the JSON safely** — heredoc interpolation breaks if any field contains a quote or newline (e.g. comment like `Chloe said "amazing"`):
+Before ending Turn 1, write the recap state to disk in a private subdir (other skills can't read it). Use `jq` to build JSON safely so embedded quotes don't break parsing:
 
 ```bash
+mkdir -p /workspace/group/.private/pp-google-maps
 jq -n \
   --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg place_name "<Place Name>" \
@@ -150,10 +138,10 @@ jq -n \
   '{created_at: $created_at, place_name: $place_name, place_url: $place_url,
     place_cid: $place_cid, place_address: $place_address, city: $city,
     list_name: $list_name, list_exists: $list_exists, comment: $comment}' \
-  > /workspace/group/.gmaps-pending.json
+  > /workspace/group/.private/pp-google-maps/pending.json
 ```
 
-`place_cid` is the canonical fallback if `place_url` 404s on Turn 2. Identity tuple `(place_name, place_address, city)` is the last-resort fallback for re-search.
+`place_cid` is the fallback if `place_url` 404s on Turn 2. Identity tuple `(place_name, place_address, city)` is the last-resort re-search fallback.
 
 (`list_exists` is `"true"` or `"false"` for `--argjson` — both are valid JSON literals.)
 
@@ -163,10 +151,10 @@ Race-condition note: there's one pending file per group. If Soph sends a second 
 
 ## When Soph replies
 
-- `yes` (or `y` / `yeah` / `go`) → read `.gmaps-pending.json`, proceed to Section 6 (Save flow), delete the pending file on success.
-- `no` (or `n` / `cancel`) → delete `.gmaps-pending.json`, reply `"Dropped."` and stop.
+- `yes` (or `y` / `yeah` / `go`) → read `pending.json`, proceed to Section 6 (Save flow), delete the pending file on success.
+- `no` (or `n` / `cancel`) → delete `pending.json`, reply `"Dropped."` and stop.
 - Anything else → treat as a clarification. If the place/city/comment changes, re-run the recap and rewrite the pending file.
-- **Pending file > 10 min old** when Soph replies → expire it. Reply: `"Recap expired — send the rec again if you still want to save it."` Delete the file.
+- **Pending file > 60 min old** when Soph replies → expire it. Reply: `"That save request expired — send the rec again."` Delete the file. (60 min so brunch-length conversations don't time out.)
 
 ---
 
@@ -175,7 +163,7 @@ Race-condition note: there's one pending file per group. If Soph sends a second 
 After auth pre-flight, search Maps:
 
 ```bash
-agent-browser --state "$GMAPS_STATE" open "https://www.google.com/maps/search/<urlencoded query>"
+agent-browser --state /home/node/.config/google-maps/state.json open "https://www.google.com/maps/search/<urlencoded query>"
 agent-browser wait --load networkidle
 agent-browser snapshot -i
 ```
@@ -215,25 +203,26 @@ Only reached AFTER Soph replies `yes` to the recap.
 ## 6a — Read the pending file + re-open the place
 
 ```bash
-test -f /workspace/group/.gmaps-pending.json || {
+PENDING=/workspace/group/.private/pp-google-maps/pending.json
+test -f "$PENDING" || {
   # No pending state — Soph's "yes" doesn't refer to anything we recapped.
-  # Reply: "No pending save — send the rec again."
+  # Reply: "Nothing pending — send the rec again."
   exit 1
 }
-PLACE_URL=$(jq -r .place_url /workspace/group/.gmaps-pending.json)
-PLACE_CID=$(jq -r .place_cid /workspace/group/.gmaps-pending.json)
-PLACE_NAME=$(jq -r .place_name /workspace/group/.gmaps-pending.json)
-PLACE_ADDRESS=$(jq -r .place_address /workspace/group/.gmaps-pending.json)
-CITY=$(jq -r .city /workspace/group/.gmaps-pending.json)
-LIST_NAME=$(jq -r .list_name /workspace/group/.gmaps-pending.json)
-COMMENT=$(jq -r .comment /workspace/group/.gmaps-pending.json)
+PLACE_URL=$(jq -r .place_url "$PENDING")
+PLACE_CID=$(jq -r .place_cid "$PENDING")
+PLACE_NAME=$(jq -r .place_name "$PENDING")
+PLACE_ADDRESS=$(jq -r .place_address "$PENDING")
+CITY=$(jq -r .city "$PENDING")
+LIST_NAME=$(jq -r .list_name "$PENDING")
+COMMENT=$(jq -r .comment "$PENDING")
 ```
 
 Re-run the pre-flight from Section 3 (state load + auth check), then re-open the place with fallback. The original URL is the fast path; CID and name-search are progressively-more-resilient fallbacks for the case where Maps' session-bound URL segments have rotated:
 
 ```bash
 # Fast path: original URL
-agent-browser --state "$GMAPS_STATE" open "$PLACE_URL"
+agent-browser --state /home/node/.config/google-maps/state.json open "$PLACE_URL"
 agent-browser wait --load networkidle
 
 # Verify we landed on a place panel (not a search results list / homepage)
@@ -241,7 +230,7 @@ LANDED_NAME=$(agent-browser eval "document.querySelector('main h1, h1[role=\"hea
 if [[ -z "$LANDED_NAME" || "$LANDED_NAME" != *"$PLACE_NAME"* ]]; then
   # Fallback 1: re-search by name + city
   Q=$(jq -rn --arg n "$PLACE_NAME" --arg c "$CITY" '"\($n) \($c)"|@uri')
-  agent-browser --state "$GMAPS_STATE" open "https://www.google.com/maps/search/$Q"
+  agent-browser --state /home/node/.config/google-maps/state.json open "https://www.google.com/maps/search/$Q"
   agent-browser wait --load networkidle
   agent-browser find text "$PLACE_NAME" click
   agent-browser wait --load networkidle
@@ -253,7 +242,7 @@ if [[ -z "$LANDED_NAME" || "$LANDED_NAME" != *"$PLACE_NAME"* ]]; then
     # Reply: "The place I just re-opened doesn't match the address I showed
     # you in the recap. Not saving. Send the rec again — Maps may have
     # rotated the link or moved the place."
-    rm -f /workspace/group/.gmaps-pending.json
+    rm -f /workspace/group/.private/pp-google-maps/pending.json
     exit 1
   fi
 fi
@@ -328,7 +317,7 @@ If `$SAVE_STATE` is still `unsaved`, the dialog committed without binding to a l
 ## 6e — Clean up pending + reply
 
 ```bash
-rm -f /workspace/group/.gmaps-pending.json
+rm -f /workspace/group/.private/pp-google-maps/pending.json
 ```
 
 Reply to Soph:
@@ -350,9 +339,8 @@ Created new list <list name> and saved <Place Name>. Note: "<comment>"
 - **Confirmation is mandatory before any write.** Section 4. No exceptions.
 - **No retry-loop past 2 attempts on any Maps interaction.** If a click fails twice (snapshot doesn't show the expected next state), STOP and report what you see. Do not iterate against the live UI — risks unintended saves to the wrong list.
 - **Login wall = stop, don't re-auth.** Soph re-authenticates from her laptop using the host ceremony.
-- **Preserve Soph's city naming.** If she wrote `Mexico City`, the list is `Mexico City`. Don't normalize, translate, or shorten.
-- **Don't volunteer information about other lists.** If Soph asks about her "Mexico City" list, only report what's visible during this session. Don't speculate about list contents from prior runs.
-- **Stay on personal account.** If the snapshot shows a different account active (e.g. `sophie@2389.ai`), STOP. Reply: `"Maps is on the wrong account — please switch to personal on your laptop and re-save state."` Do NOT switch accounts from inside the container.
+- **Stay on personal account.** If the chip eval returns `2389.ai`, STOP. Do NOT switch accounts from inside the container.
+- **Note on cross-skill trust.** The auth-state mount at `/home/node/.config/google-maps/state.json` holds full Google session cookies. Any other in-container skill with bash access could `cat` this file and exfil the cookies (full account, not just Maps). This is a known limitation accepted for personal-use scope. If you add a new skill that ingests untrusted external content, audit this exposure first.
 
 ---
 
@@ -360,18 +348,13 @@ Created new list <list name> and saved <Place Name>. Note: "<comment>"
 
 | Failure | Action |
 |---|---|
-| State file missing | Reply: `"Auth state missing — run the host login script."` |
-| Login wall on first navigation (URL redirects to /signin) | Reply: `"Maps session expired — re-auth on your laptop."` |
-| Anonymous homepage (no account chip in DOM, URL looks normal) | Treat as logged-out. Reply: `"Maps loaded anonymously — auth state likely expired. Re-auth on your laptop."` |
-| Wrong account active (chip aria-label contains `2389.ai`) | Reply: `"Maps is on the work account, not personal — switch on your laptop and re-save state."` |
-| CAPTCHA / "unusual activity" challenge mid-flow | Snapshot, screenshot to `/workspace/group/.gmaps-debug-$(date +%s).png`, reply: `"Maps hit a CAPTCHA challenge. Screenshot saved. Re-run the host login ceremony to refresh trust."` |
-| Place not found after search | Reply: `"Couldn't find '<place>' in <city>. Spelling, or got a Maps share link?"` |
-| Address eval returns empty | Reply: `"Found a place card but couldn't read the address — got a Maps share link or the full address?"` |
-| List-picker UI doesn't appear after Save click (selector drift) — all three Save-button selectors failed | Snapshot, screenshot to `/workspace/group/.gmaps-debug-$(date +%s).png`, reply: `"Maps UI shifted — couldn't find the Save button. Screenshot saved. Save manually for now."` |
-| Note field not found | Save the place to the list anyway (better than losing the save), then reply: `"Saved to <list>, but couldn't attach the note via UI. Note: '<comment>' — add manually if you want it on the pin."` |
-| Pending file > 10 min old when Soph replies `yes` | Reply: `"Recap expired — send the rec again if you still want to save it."` Delete the pending file. |
-| Re-opened place address doesn't match the recap address (Section 6a) | Reply: `"The place I just re-opened doesn't match what I showed you. Not saving. Send the rec again — Maps may have rotated the link."` Delete the pending file. |
-| Place already saved to a list (Section 6b idempotency check) | Reply: `"Already on your <list-name> list — nothing to do."` Delete the pending file. NOT a failure — short-circuit the flow. |
+| State file missing OR account chip empty OR `2389.ai` in chip | Reply: `"Maps login expired (or wrong account). Next time you're at your Mac: ~/projects/nanoclaw/container/skills/pp-google-maps/scripts/login.sh"` |
+| CAPTCHA / "unusual activity" challenge mid-flow | Reply: `"Maps hit a CAPTCHA. Run login.sh on your Mac to refresh trust."` |
+| Place not found after search | Reply: `"Couldn't find '<place>' in <city>. Different spelling, or got a Maps share link?"` |
+| List-picker UI doesn't appear after Save click (Maps DOM drift) | Reply: `"Maps UI shifted — couldn't find the list picker. Save it manually for now."` |
+| Note field not found inside save dialog | Save to list anyway (better than losing the save), then reply: `"Saved to <list>, but couldn't attach the note. Add '<comment>' manually if you want it on the pin."` |
+| Re-opened place address doesn't match the recap address (Section 6a) | Reply: `"The place I re-opened doesn't match what I showed you. Not saving. Send the rec again."` Delete the pending file. |
+| Place already saved to a list (Section 6b idempotency check) | Reply: `"Already on your <list-name> list."` Delete the pending file. Short-circuit. |
 | Soph's confirmation is unclear | Re-recap. Do not write. |
 
 ---
