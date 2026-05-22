@@ -140,17 +140,20 @@ Before ending Turn 1, write the recap state to disk so Turn 2 doesn't depend on 
 jq -n \
   --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg place_name "<Place Name>" \
-  --arg place_url "<canonical Maps URL>" \
-  --arg place_address "<full address>" \
+  --arg place_url "$URL" \
+  --arg place_cid "$CID" \
+  --arg place_address "$ADDRESS" \
   --arg city "<city as Soph wrote it>" \
   --arg list_name "<city — same string>" \
   --argjson list_exists "true" \
   --arg comment "<note text>" \
   '{created_at: $created_at, place_name: $place_name, place_url: $place_url,
-    place_address: $place_address, city: $city, list_name: $list_name,
-    list_exists: $list_exists, comment: $comment}' \
+    place_cid: $place_cid, place_address: $place_address, city: $city,
+    list_name: $list_name, list_exists: $list_exists, comment: $comment}' \
   > /workspace/group/.gmaps-pending.json
 ```
+
+`place_cid` is the canonical fallback if `place_url` 404s on Turn 2. Identity tuple `(place_name, place_address, city)` is the last-resort fallback for re-search.
 
 (`list_exists` is `"true"` or `"false"` for `--argjson` — both are valid JSON literals.)
 
@@ -188,13 +191,20 @@ For the verified place, click into its page so you have a stable URL AND can rea
 ```bash
 agent-browser find text "<Place Name>" click
 agent-browser wait --load networkidle
-agent-browser get url   # canonical place URL → goes in .gmaps-pending.json
+
+# Capture URL + the canonical place CID (stable across sessions).
+# Maps URLs can drift between Turn 1 (recap) and Turn 2 (save) because the
+# !4m/!3m viewport segments are session-bound. The !1s0x[hex]:0x[hex] CID
+# segment IS the place identity and survives. Store both — Turn 2 falls
+# back to re-searching by name+address+city if the URL 404s.
+URL=$(agent-browser get url)
+CID=$(echo "$URL" | grep -oE '!1s0x[0-9a-f]+:0x[0-9a-f]+' | head -1)
 
 # Extract the full address from the place panel (used in the recap)
-agent-browser eval "document.querySelector('button[data-item-id=\"address\"], [data-item-id*=\"address\"]')?.textContent?.trim() || ''"
+ADDRESS=$(agent-browser eval "document.querySelector('button[data-item-id=\"address\"], [data-item-id*=\"address\"]')?.textContent?.trim() || ''")
 ```
 
-If the address eval returns empty, fall back to a snapshot-and-look — the address line is typically near the top of the place panel, prefixed with a location pin icon. Don't proceed to the recap without an address — better to ask Soph "got an address or a Maps link?" than to confirm against just a name.
+If `$ADDRESS` is empty, fall back to a snapshot-and-look — the address line is typically near the top of the place panel, prefixed with a location pin icon. Don't proceed to the recap without an address — better to ask Soph "got an address or a Maps link?" than to confirm against just a name.
 
 ---
 
@@ -210,51 +220,110 @@ test -f /workspace/group/.gmaps-pending.json || {
   # Reply: "No pending save — send the rec again."
   exit 1
 }
-PENDING=$(cat /workspace/group/.gmaps-pending.json)
-# Parse: place_name, place_url, list_name, list_exists, comment, city
+PLACE_URL=$(jq -r .place_url /workspace/group/.gmaps-pending.json)
+PLACE_CID=$(jq -r .place_cid /workspace/group/.gmaps-pending.json)
+PLACE_NAME=$(jq -r .place_name /workspace/group/.gmaps-pending.json)
+PLACE_ADDRESS=$(jq -r .place_address /workspace/group/.gmaps-pending.json)
+CITY=$(jq -r .city /workspace/group/.gmaps-pending.json)
+LIST_NAME=$(jq -r .list_name /workspace/group/.gmaps-pending.json)
+COMMENT=$(jq -r .comment /workspace/group/.gmaps-pending.json)
 ```
 
-Re-run the pre-flight from Section 3 (state load + auth check), then re-open the place:
+Re-run the pre-flight from Section 3 (state load + auth check), then re-open the place with fallback. The original URL is the fast path; CID and name-search are progressively-more-resilient fallbacks for the case where Maps' session-bound URL segments have rotated:
 
 ```bash
-agent-browser --state "$GMAPS_STATE" open "<place_url from pending>"
+# Fast path: original URL
+agent-browser --state "$GMAPS_STATE" open "$PLACE_URL"
 agent-browser wait --load networkidle
+
+# Verify we landed on a place panel (not a search results list / homepage)
+LANDED_NAME=$(agent-browser eval "document.querySelector('main h1, h1[role=\"heading\"]')?.textContent?.trim() || ''")
+if [[ -z "$LANDED_NAME" || "$LANDED_NAME" != *"$PLACE_NAME"* ]]; then
+  # Fallback 1: re-search by name + city
+  Q=$(jq -rn --arg n "$PLACE_NAME" --arg c "$CITY" '"\($n) \($c)"|@uri')
+  agent-browser --state "$GMAPS_STATE" open "https://www.google.com/maps/search/$Q"
+  agent-browser wait --load networkidle
+  agent-browser find text "$PLACE_NAME" click
+  agent-browser wait --load networkidle
+
+  # Verify the address matches what we recapped — if not, ABORT (we'd be
+  # saving the wrong place). Per Section 7 hard rules.
+  LANDED_ADDR=$(agent-browser eval "document.querySelector('button[data-item-id=\"address\"]')?.textContent?.trim() || ''")
+  if [[ "$LANDED_ADDR" != "$PLACE_ADDRESS" ]]; then
+    # Reply: "The place I just re-opened doesn't match the address I showed
+    # you in the recap. Not saving. Send the rec again — Maps may have
+    # rotated the link or moved the place."
+    rm -f /workspace/group/.gmaps-pending.json
+    exit 1
+  fi
+fi
 ```
 
 ## 6b — Find or create the city list
 
-1. Click the **Save** action on the place page. Try the canonical selector first, then fall back to less-specific selectors since Maps A/B-tests Save button presentation. The `||` cascade is for **selector-not-found** failures — if any `find` matches an element, the cascade should stop. Confirm by snapshotting between attempts only if the first appears to have failed-but-clicked (rare):
+1. **Idempotency check first.** When a place is ALREADY saved to any of Soph's lists, Maps renders the same action slot as a "Saved" button with `aria-pressed="true"`. Clicking it WOULD UNSAVE the place from its current list — destructive. Read the button state before clicking:
    ```bash
-   # Primary → fallback → last-resort
-   agent-browser find role button click --name "Save" || \
-     agent-browser find label "Save" click || \
-     agent-browser find text "Save" click
+   SAVE_STATE=$(agent-browser eval "
+     const b = document.querySelector('[data-tooltip=\"Save\"], button[aria-label*=\"Save\"], button[aria-label*=\"Saved\"]');
+     if (!b) return 'missing';
+     if (b.getAttribute('aria-pressed') === 'true') return 'saved';
+     const label = (b.getAttribute('aria-label') || b.textContent || '').toLowerCase();
+     if (label.startsWith('saved') || label.includes('remove from')) return 'saved';
+     return 'unsaved';
+   ")
+   ```
+   - `saved` → place is already on a list. Read which list (open the saved-indicator tooltip / snapshot) and reply: `"Already on your <list-name> list — nothing to do."` Delete the pending file. STOP.
+   - `missing` → see Section 8 row "List-picker UI doesn't appear."
+   - `unsaved` → proceed to the click below.
+
+2. **Click Save.** Single selector — if Maps drifts, fail loudly via Section 8 rather than cascading and risking the wrong click:
+   ```bash
+   agent-browser find role button click --name "Save"
    agent-browser snapshot -i
    ```
-   If the snapshot still shows the place page (no list-picker), abort: see Section 8 row "List-picker UI doesn't appear." Do NOT iterate further — risks double-saving if a prior click DID land but the UI lagged.
-2. A list-picker UI appears. Read the snapshot. List matching is **case-insensitive** when finding existing lists (avoids creating duplicate `Brighton` / `brighton`), but **exact-case as Soph wrote it** when creating new lists.
-   - **Existing list (case-insensitive match)** → click it. Done with list selection.
-   - **No match** → click `New list` (or `Create list` depending on UI), enter the city name as Soph wrote it (preserving `Mexico City` — do NOT auto-shorten to `CDMX`), set visibility to **Private**, click Create.
-
-## 6c — Attach the note
-
-After the place is saved to the list:
-
-1. Open the saved place's note field. UI varies — look for a textarea/button matching `/note/i` (Maps labels it `Note` or `Add a note` depending on entry path).
-2. Fill in the comment text exactly as recapped to Soph:
+   If the snapshot still shows the place page with no list-picker dialog, abort: see Section 8.
+3. **Pick the list inside the dialog.** Maps renders the list-picker as a `role=dialog` (label `"Save in your lists"`) containing one `role=menuitemcheckbox` per existing list. Each menuitem's accessible name combines list title + place count (e.g. `"Mexico City, 47 places"`). Wait for the dialog before reading:
    ```bash
-   agent-browser find role textbox fill "<comment>" || \
-     agent-browser find label --regex "note" fill "<comment>"
-   agent-browser find role button click --name "Save"
+   agent-browser wait --selector '[role="dialog"]' || \
+     agent-browser wait --text "Save in your lists"
+   agent-browser snapshot -i
+   ```
+   List matching is **case-insensitive** when finding existing lists (avoids creating duplicate `Brighton` / `brighton`), but **exact-case as Soph wrote it** when creating new lists.
+   - **Existing list match** → `agent-browser find role menuitemcheckbox click --name "<city>"`. Substring-match means `"Mexico City"` would also match `"Mexico City - Roma"`; if multiple match, prefer the shorter list name.
+   - **No match** → click `New list` (the primary button at the bottom of the dialog), enter the city name as Soph wrote it (preserving `Mexico City` — do NOT auto-shorten to `CDMX`), click Create. (Privacy default is Private since 2023, no explicit toggle needed.)
+
+## 6c — Attach the note (still inside the same dialog)
+
+Important: in current Maps (since ~2024), the note textarea lives **inside the same `role=dialog` opened by step 6b**, expanded after selecting the list. It is NOT on the saved-list view, NOT on the place card, and NOT a separate modal. Do NOT dismiss the dialog before attaching the note — dismissing it commits the save without the note.
+
+After clicking the list (step 6b.3):
+
+1. The dialog expands to show a `textarea` with placeholder `"Add a note"`. Fill it:
+   ```bash
+   agent-browser find role textbox fill "$COMMENT"
+   ```
+2. Close the dialog to commit. Maps auto-saves note + list selection on close — no separate Save button to click (any Save button inside the dialog is for the list selection, not the note, and clicking it after the textbox fill is a no-op):
+   ```bash
+   agent-browser find role button click --name "Done" || \
+     agent-browser keyboard press Escape
+   ```
+3. Wait for the dialog to dismiss before verifying:
+   ```bash
+   agent-browser wait --no-selector '[role="dialog"]'
    ```
 
 ## 6d — Verify
 
+The same Save button you read in 6b's idempotency check should now report `aria-pressed="true"` and its accessible label should change to `"Saved"`:
+
 ```bash
-agent-browser snapshot -i
+SAVE_STATE=$(agent-browser eval "
+  const b = document.querySelector('button[aria-label*=\"Saved\"], [aria-pressed=\"true\"][data-tooltip=\"Save\"]');
+  return b ? (b.getAttribute('aria-label') || 'saved') : 'unsaved';
+")
 ```
 
-Confirm the place card shows "Saved to <list name>" and the note is attached. If verification fails, see Section 8.
+If `$SAVE_STATE` is still `unsaved`, the dialog committed without binding to a list — see Section 8 row "List-picker UI doesn't appear" (the save didn't actually land).
 
 ## 6e — Clean up pending + reply
 
@@ -301,6 +370,8 @@ Created new list <list name> and saved <Place Name>. Note: "<comment>"
 | List-picker UI doesn't appear after Save click (selector drift) — all three Save-button selectors failed | Snapshot, screenshot to `/workspace/group/.gmaps-debug-$(date +%s).png`, reply: `"Maps UI shifted — couldn't find the Save button. Screenshot saved. Save manually for now."` |
 | Note field not found | Save the place to the list anyway (better than losing the save), then reply: `"Saved to <list>, but couldn't attach the note via UI. Note: '<comment>' — add manually if you want it on the pin."` |
 | Pending file > 10 min old when Soph replies `yes` | Reply: `"Recap expired — send the rec again if you still want to save it."` Delete the pending file. |
+| Re-opened place address doesn't match the recap address (Section 6a) | Reply: `"The place I just re-opened doesn't match what I showed you. Not saving. Send the rec again — Maps may have rotated the link."` Delete the pending file. |
+| Place already saved to a list (Section 6b idempotency check) | Reply: `"Already on your <list-name> list — nothing to do."` Delete the pending file. NOT a failure — short-circuit the flow. |
 | Soph's confirmation is unclear | Re-recap. Do not write. |
 
 ---
