@@ -140,13 +140,40 @@ Keep it terse — Soph reads this on her phone, often mid-conversation.
 
 **Hard rule:** Before ending Turn 1, you MUST write `pending.json`. The recap-without-pending-file is a bug — Soph's `yes` will refer to nothing on disk and the saves get lost. (This bug lost the Puesto/Georges/Cottage/Pavilions batch on 2026-05-22.)
 
-The schema is an **array of items**, even for a single place. Use `jq` to build JSON safely so embedded quotes don't break parsing:
+The schema is an **array of items**, even for a single place. Use `jq` to build JSON safely so embedded quotes don't break parsing.
+
+**Minimal N=1 example** (a single place — still uses the items array):
+
+```bash
+mkdir -p /workspace/group/.private/pp-google-maps
+
+ITEMS=$(jq -n \
+  --arg n1 "Bar Tatu" --arg u1 "$URL1" --arg c1 "$CID1" --arg a1 "$ADDRESS1" --arg note1 "Chloe rec'd this" \
+  '[{place_name: $n1, place_url: $u1, place_cid: $c1, place_address: $a1, note: $note1}]')
+
+jq -n \
+  --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg city "Mexico City" \
+  --arg list_name "Mexico City" \
+  --argjson list_exists "false" \
+  --argjson items "$ITEMS" \
+  '{created_at: $created_at, city: $city, list_name: $list_name,
+    list_exists: $list_exists, items: $items}' \
+  > /workspace/group/.private/pp-google-maps/pending.json
+
+# MANDATORY: verify the file actually exists before sending the recap.
+test -s /workspace/group/.private/pp-google-maps/pending.json || {
+  echo "ABORT: pending.json write failed; do not send the recap, do not end the turn." >&2
+  exit 1
+}
+```
+
+**N=4 batch example:**
 
 ```bash
 mkdir -p /workspace/group/.private/pp-google-maps
 
 # Build the items array. For each place collected in Section 5, append an object.
-# Example for N=4. For N=1, the array just has one item.
 ITEMS=$(jq -n \
   --arg n1 "Puesto La Jolla" --arg u1 "$URL1" --arg c1 "$CID1" --arg a1 "$ADDRESS1" --arg note1 "Kari rec'd, good to walk to" \
   --arg n2 "Georges at the Cove" --arg u2 "$URL2" --arg c2 "$CID2" --arg a2 "$ADDRESS2" --arg note2 "Kari rec'd, outdoor bar" \
@@ -170,13 +197,21 @@ jq -n \
   > /workspace/group/.private/pp-google-maps/pending.json
 ```
 
+```bash
+# MANDATORY (same as N=1): verify file exists before ending the turn.
+test -s /workspace/group/.private/pp-google-maps/pending.json || {
+  echo "ABORT: pending.json write failed; do not send the recap, do not end the turn." >&2
+  exit 1
+}
+```
+
 `place_cid` per item is the fallback if `place_url` 404s on Turn 2. Identity tuple `(place_name, place_address, city)` per item is the last-resort re-search fallback.
 
 (`list_exists` is `"true"` or `"false"` for `--argjson` — both are valid JSON literals.)
 
 Race-condition note: one pending file per group. If Soph sends a second distinct rec batch before replying `yes` to the first, the second recap overwrites the first. Acceptable for personal use — Soph can resend.
 
-**End the turn here. The pending.json must be on disk. Verify with `test -f /workspace/group/.private/pp-google-maps/pending.json` before sending the recap.** Do NOT proceed to the save click. Wait for Soph's next message.
+**End the turn here.** Do NOT proceed to the save click. Wait for Soph's next message.
 
 ## When Soph replies
 
@@ -189,7 +224,9 @@ Race-condition note: one pending file per group. If Soph sends a second distinct
 
 # Section 5 — Search + disambiguate
 
-After auth pre-flight, search Maps:
+**Run this section ONCE per place Soph mentioned.** For a 4-place batch, loop 4 times and collect each place's data into a separate variable (or directly into the `items[]` array). Suffix the per-place vars (e.g. `URL1, CID1, ADDRESS1` for place 1; `URL2, CID2, ADDRESS2` for place 2) so they don't get overwritten as you process each.
+
+After auth pre-flight (Section 3 — runs ONCE for the whole batch), for EACH place i in the user's message, repeat:
 
 ```bash
 agent-browser --state /home/node/.config/google-maps/state.json open "https://www.google.com/maps/search/<urlencoded query>"
@@ -308,7 +345,9 @@ fi
      return 'unsaved';
    ")
    ```
-   - `saved` → place is already on a list. Read which list (open the saved-indicator tooltip / snapshot) and reply: `"Already on your <list-name> list — nothing to do."` Delete the pending file. STOP.
+   - `saved` → place is already on a list.
+     - **Single-item flow** (TOTAL=1): reply `"Already on your <list-name> list — nothing to do."` Delete the pending file. STOP.
+     - **Batch flow** (TOTAL>1): record this item as ⏭ in the batch report (Section 6e), `continue` to the next iteration. Do NOT delete the pending file. Do NOT stop the batch.
    - `missing` → see Section 8 row "List-picker UI doesn't appear."
    - `unsaved` → proceed to the click below.
 
@@ -425,7 +464,9 @@ Couldn't save any of the 4 — <reason>. Pending file kept; try again or say `ca
 | List-picker UI doesn't appear after Save click (Maps DOM drift) | Reply: `"Maps UI shifted — couldn't find the list picker. Save it manually for now."` |
 | Note field not found inside save dialog | Save to list anyway (better than losing the save), then reply: `"Saved to <list>, but couldn't attach the note. Add '<comment>' manually if you want it on the pin."` |
 | Re-opened place address doesn't match the recap address (Section 6a) | Reply: `"The place I re-opened doesn't match what I showed you. Not saving. Send the rec again."` Delete the pending file. |
-| Place already saved to a list (Section 6b idempotency check) | Reply: `"Already on your <list-name> list."` Delete the pending file. Short-circuit. |
+| Place already saved to a list (Section 6b idempotency check) — SINGLE-item flow | Reply: `"Already on your <list-name> list."` Delete the pending file. Short-circuit. |
+| Place already saved to a list — BATCH flow (TOTAL>1) | Record as ⏭ in the batch summary (Section 6e). `continue` to the next item. Do NOT delete the pending file mid-loop. Do NOT abort the batch. |
+| Mid-batch item failure (Section 6b/6c/6d throws after some items have saved) | Break the loop. Build the batch summary (Section 6e) listing ✅ for completed items, ❌ for the failing item with its reason, and ❌ for the remaining unprocessed items. Keep the pending file on disk so Soph can retry the remainder by replying `yes` again — but tell her so explicitly: `"Saved <N>/<TOTAL>. Reply yes to retry the rest, or no to drop."` |
 | Soph's confirmation is unclear | Re-recap. Do not write. |
 
 ---
