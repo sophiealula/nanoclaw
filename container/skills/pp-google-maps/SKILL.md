@@ -134,22 +134,27 @@ Reply `yes` to save, or `no` to drop.
 
 ## Pending file (cross-turn state)
 
-Before ending Turn 1, write the recap state to disk so Turn 2 doesn't depend on transcript memory alone:
+Before ending Turn 1, write the recap state to disk so Turn 2 doesn't depend on transcript memory alone. **Use `jq` to build the JSON safely** — heredoc interpolation breaks if any field contains a quote or newline (e.g. comment like `Chloe said "amazing"`):
 
 ```bash
-cat > /workspace/group/.gmaps-pending.json <<EOF
-{
-  "created_at": "<ISO 8601 now>",
-  "place_name": "<Place Name>",
-  "place_url": "<canonical Maps URL>",
-  "place_address": "<full address>",
-  "city": "<city as Soph wrote it>",
-  "list_name": "<city — same string>",
-  "list_exists": true|false,
-  "comment": "<note text>"
-}
-EOF
+jq -n \
+  --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg place_name "<Place Name>" \
+  --arg place_url "<canonical Maps URL>" \
+  --arg place_address "<full address>" \
+  --arg city "<city as Soph wrote it>" \
+  --arg list_name "<city — same string>" \
+  --argjson list_exists "true" \
+  --arg comment "<note text>" \
+  '{created_at: $created_at, place_name: $place_name, place_url: $place_url,
+    place_address: $place_address, city: $city, list_name: $list_name,
+    list_exists: $list_exists, comment: $comment}' \
+  > /workspace/group/.gmaps-pending.json
 ```
+
+(`list_exists` is `"true"` or `"false"` for `--argjson` — both are valid JSON literals.)
+
+Race-condition note: there's one pending file per group. If Soph sends a second distinct rec before replying `yes` to the first, the second recap overwrites the first. Section 4's clarification rule handles same-place tweaks; for back-to-back distinct recs, the second recap silently invalidates the first. This is acceptable for personal use — the recap itself is ephemeral and Soph can resend.
 
 **End the turn here.** Do NOT proceed to the save click. Wait for Soph's next message.
 
@@ -218,15 +223,15 @@ agent-browser wait --load networkidle
 
 ## 6b — Find or create the city list
 
-1. Click the **Save** action on the place page. Try the canonical selector first, then fall back to less-specific selectors since Maps A/B-tests Save button presentation:
+1. Click the **Save** action on the place page. Try the canonical selector first, then fall back to less-specific selectors since Maps A/B-tests Save button presentation. The `||` cascade is for **selector-not-found** failures — if any `find` matches an element, the cascade should stop. Confirm by snapshotting between attempts only if the first appears to have failed-but-clicked (rare):
    ```bash
-   # Primary
+   # Primary → fallback → last-resort
    agent-browser find role button click --name "Save" || \
      agent-browser find label "Save" click || \
      agent-browser find text "Save" click
    agent-browser snapshot -i
    ```
-   If all three fail, abort: see Section 8 row "List-picker UI doesn't appear."
+   If the snapshot still shows the place page (no list-picker), abort: see Section 8 row "List-picker UI doesn't appear." Do NOT iterate further — risks double-saving if a prior click DID land but the UI lagged.
 2. A list-picker UI appears. Read the snapshot. List matching is **case-insensitive** when finding existing lists (avoids creating duplicate `Brighton` / `brighton`), but **exact-case as Soph wrote it** when creating new lists.
    - **Existing list (case-insensitive match)** → click it. Done with list selection.
    - **No match** → click `New list` (or `Create list` depending on UI), enter the city name as Soph wrote it (preserving `Mexico City` — do NOT auto-shorten to `CDMX`), set visibility to **Private**, click Create.
