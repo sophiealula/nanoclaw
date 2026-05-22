@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "NanoClaw Maps Saver",
+  "version": "0.1.0",
+  "description": "Sophie's personal Maps-saver. Polls a localhost queue from NanoClaw and saves places to her real signed-in Google Maps Saved Places lists. Works because it runs inside her real Chrome session, bypassing all the Playwright bot-detection drama.",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://www.google.com/maps/*",
+    "http://localhost:7733/*",
+    "http://127.0.0.1:7733/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "NanoClaw Maps Saver",
+    "default_popup": "popup.html"
+  }
+}

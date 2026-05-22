@@ -5,15 +5,19 @@ import { OneCLI } from '@onecli-sh/sdk';
 
 import {
   ASSISTANT_NAME,
+  CREDENTIAL_PROXY_PORT,
   DEFAULT_TRIGGER,
   getTriggerPattern,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  LONG_TASK_REACTION_EMOJI,
+  LONG_TASK_REACTION_MS,
   MAX_MESSAGES_PER_PROMPT,
   ONECLI_URL,
   POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
+import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -61,6 +65,8 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { startMapsQueueServer } from './maps-queue.js';
+import { isRawTransportError } from './transport-error.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -75,6 +81,46 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+
+// Track 👀 → ✍ reaction swaps for slow tasks. Per chat: a single timer that,
+// when it fires, swaps the 👀 receipt on every still-pending user message to ✍
+// to signal "still working." Cancelled the moment any output (agent reply OR
+// intermediate progress message) goes back to that chat. Keyed by chatJid.
+const pendingChatReactions = new Map<
+  string,
+  {
+    messageIds: string[];
+    timer: ReturnType<typeof setTimeout>;
+  }
+>();
+
+function trackForSlowReaction(
+  channel: Channel,
+  chatJid: string,
+  messageId: string,
+): void {
+  if (!channel.setReaction) return;
+  const existing = pendingChatReactions.get(chatJid);
+  if (existing) {
+    existing.messageIds.push(messageId);
+    return;
+  }
+  const messageIds: string[] = [messageId];
+  const timer = setTimeout(() => {
+    for (const id of messageIds) {
+      void channel.setReaction!(chatJid, id, LONG_TASK_REACTION_EMOJI);
+    }
+    pendingChatReactions.delete(chatJid);
+  }, LONG_TASK_REACTION_MS);
+  pendingChatReactions.set(chatJid, { messageIds, timer });
+}
+
+function cancelPendingChatReactions(chatJid: string): void {
+  const existing = pendingChatReactions.get(chatJid);
+  if (!existing) return;
+  clearTimeout(existing.timer);
+  pendingChatReactions.delete(chatJid);
+}
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -263,6 +309,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     'Processing messages',
   );
 
+  // Acknowledge receipt with a 👀 reaction on each user-sent message so the
+  // sender knows the bot saw it even when the actual reply takes minutes
+  // (e.g. long tool loops). Semantics: 👀 means "message was picked up", NOT
+  // "reply is guaranteed" — if the container spawn below fails and the cursor
+  // rolls back, the same messages re-process on the next poll and Telegram's
+  // setMessageReaction is idempotent, so retries are safe no-ops.
+  // Best-effort: failures are debug-logged, never raised.
+  for (const m of missedMessages) {
+    if (m.is_from_me || m.is_bot_message) continue;
+    void channel.setReaction?.(chatJid, m.id, '👀');
+    trackForSlowReaction(channel, chatJid, m.id);
+  }
+
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -292,8 +351,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+        if (isRawTransportError(text)) {
+          // Transport-level Anthropic error (529/400/etc) leaked as a result
+          // string. Never forward the raw envelope to the user — route to the
+          // error path so cursor rolls back and the inbound retries naturally.
+          logger.warn(
+            { group: group.name, snippet: text.slice(0, 120) },
+            'Suppressed raw API error from inbound user reply',
+          );
+          hadError = true;
+        } else {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -334,6 +404,26 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Persist a container run's session id ONLY when the run completed successfully.
+ *
+ * Error-path outputs from the agent-runner carry a `newSessionId` that is the
+ * *resumed* session id which just failed to load. Persisting it would resurrect
+ * a dead session row on every retry and cause an infinite loop of failed
+ * resumes. The fix is structural: the gate must be applied for both the
+ * in-memory map and the DB write, every time. Exposed for unit testing.
+ */
+export function persistSessionIfSuccess(
+  output: ContainerOutput,
+  groupFolder: string,
+  sessionsMap: Record<string, string>,
+): void {
+  if (output.newSessionId && output.status !== 'error') {
+    sessionsMap[groupFolder] = output.newSessionId;
+    setSession(groupFolder, output.newSessionId);
+  }
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
@@ -369,13 +459,13 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
-  // Wrap onOutput to track session ID from streamed results
+  // Wrap onOutput to forward stream chunks, but do NOT update the in-memory
+  // `sessions` map or DB from streamed results. Error-path stream chunks carry
+  // a `newSessionId` that is the *failed-to-resume* id from the input — using
+  // it as the next run's resume target would re-trigger the same failure
+  // forever. The final, gated update happens below after the run completes.
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
-        }
         await onOutput(output);
       }
     : undefined;
@@ -396,10 +486,7 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
-    }
+    persistSessionIfSuccess(output, group.folder, sessions);
 
     if (output.status === 'error') {
       logger.error(
@@ -500,6 +587,16 @@ async function startMessageLoop(): Promise<void> {
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
+            // 👀 receipt on hot-path piping (container is already alive). Without
+            // this, follow-up messages during an active conversation got no ack —
+            // only the cold-start path in processGroupMessages was acking.
+            // Best-effort; setReaction is idempotent in Telegram so duplicate
+            // calls on retries are harmless no-ops.
+            for (const m of messagesToSend) {
+              if (m.is_from_me) continue;
+              void channel.setReaction?.(chatJid, m.id, '👀');
+              trackForSlowReaction(channel, chatJid, m.id);
+            }
             // Show typing indicator while the container processes the piped message
             channel
               .setTyping?.(chatJid, true)
@@ -543,11 +640,15 @@ function recoverPendingMessages(): void {
 
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
-  cleanupOrphans();
 }
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
+  await startCredentialProxy(CREDENTIAL_PROXY_PORT, '0.0.0.0');
+  // Clean up orphaned containers only after we've successfully bound the port.
+  // Running this before the bind allows crash-looping duplicates to kill
+  // containers belonging to the real running instance.
+  cleanupOrphans();
   initDatabase();
   logger.info('Database initialized');
   loadState();
@@ -673,6 +774,10 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Maps queue HTTP server (127.0.0.1:7733) — Chrome extension polls this
+  // for pending place-save intents from pp-google-maps skill runs.
+  startMapsQueueServer();
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -686,6 +791,7 @@ async function main(): Promise<void> {
         logger.warn({ jid }, 'No channel owns JID, cannot send message');
         return;
       }
+      cancelPendingChatReactions(jid);
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
@@ -694,6 +800,11 @@ async function main(): Promise<void> {
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      // Note: do NOT cancel slow-reaction timers here. Intermediate progress
+      // messages (mcp__nanoclaw__send_message) shouldn't suppress the ✍ swap —
+      // a task that emits a "starting..." ping at 5s but actually runs for
+      // 90s should still show ✍ at the 15s mark. Only the FINAL agent reply
+      // (queue.sendMessage callback above) cancels the swap.
       return channel.sendMessage(jid, text);
     },
     registeredGroups: () => registeredGroups,

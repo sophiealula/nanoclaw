@@ -96,6 +96,17 @@ function buildVolumeMounts(
     'nanoclaw',
     'google-maps',
   );
+  // pp-google-maps queue (Chrome-extension-driven save path).
+  // The skill writes save intents to pending/ here; the host's HTTP server
+  // exposes them to the Chrome extension. The skill polls results/ for
+  // outcomes. See src/maps-queue.ts.
+  const mapsQueueHostDir = path.join(
+    homeDir,
+    'Library',
+    'Application Support',
+    'nanoclaw',
+    'maps-queue',
+  );
   // Sophie's taste profile docs — feeds the taste-aware-event-scout skill.
   const tasteProfileDir = path.join(
     homeDir,
@@ -422,6 +433,16 @@ function buildVolumeMounts(
       readonly: true,
     });
   }
+
+  // Mount the maps-queue dir read-write. The skill writes save intents to
+  // pending/ and reads completion outcomes from results/. Created on demand
+  // by src/maps-queue.ts on host startup.
+  fs.mkdirSync(mapsQueueHostDir, { recursive: true });
+  mounts.push({
+    hostPath: mapsQueueHostDir,
+    containerPath: '/home/node/.config/maps-queue',
+    readonly: false,
+  });
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
