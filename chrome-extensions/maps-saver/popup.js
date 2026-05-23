@@ -4,10 +4,13 @@
   const statusEl = document.getElementById('status');
   const hintEl = document.getElementById('hint');
   try {
-    const res = await fetch('http://localhost:7733/queue', { method: 'GET' });
+    const res = await fetch('http://localhost:7733/health', { method: 'GET' });
     if (res.ok) {
-      const items = await res.json();
-      statusEl.textContent = `Connected ✓ (${items.length} pending)`;
+      const data = await res.json();
+      const pending = data.pending ?? 0;
+      statusEl.textContent = pending > 0
+        ? `Connected ✓ — ${pending} save${pending === 1 ? '' : 's'} pending`
+        : 'Connected ✓';
       statusEl.className = 'status ok';
       hintEl.textContent = 'NanoClaw is reachable. Place saves will land in your Saved Places lists.';
     } else {

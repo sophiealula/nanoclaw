@@ -86,7 +86,9 @@ function recordResult(id: string, result: unknown): void {
   fs.renameSync(tmpPath, resultPath);
   // Remove from pending so the extension doesn't reprocess.
   const pendingPath = path.join(root, 'pending', `${id}.json`);
-  try { fs.unlinkSync(pendingPath); } catch {}
+  try {
+    fs.unlinkSync(pendingPath);
+  } catch {}
 }
 
 export function startMapsQueueServer(): Server {
@@ -94,19 +96,35 @@ export function startMapsQueueServer(): Server {
   const server = createServer(async (req, res) => {
     const url = req.url ?? '';
     try {
+      // GET /health — simple liveness check for the extension popup and install.sh.
+      if (req.method === 'GET' && url === '/health') {
+        respondJson(res, 200, {
+          ok: true,
+          queue_dir: getMapsQueueDir(),
+          pending: listPending().length,
+        });
+        return;
+      }
+
       // GET /queue — return pending items as a JSON array.
       if (req.method === 'GET' && url === '/queue') {
         respondJson(res, 200, listPending());
         return;
       }
 
+      // Shared regex for /queue/<id>/result routes.
+      const resultRoute = /^\/queue\/([\w.:-]+)\/result$/.exec(url);
+
       // POST /queue/<id>/result — record the extension's outcome.
-      const m = /^\/queue\/([\w.:-]+)\/result$/.exec(url);
-      if (req.method === 'POST' && m) {
-        const id = m[1];
+      if (req.method === 'POST' && resultRoute) {
+        const id = resultRoute[1];
         const body = await readBody(req);
         let result: unknown = {};
-        try { result = JSON.parse(body); } catch { result = { raw: body }; }
+        try {
+          result = JSON.parse(body);
+        } catch {
+          result = { raw: body };
+        }
         recordResult(id, result);
         logger.info({ id, result }, 'Maps queue result recorded');
         respondJson(res, 200, { ok: true });
@@ -114,10 +132,13 @@ export function startMapsQueueServer(): Server {
       }
 
       // GET /queue/<id>/result — let the container skill poll for results.
-      const rm = /^\/queue\/([\w.:-]+)\/result$/.exec(url);
-      if (req.method === 'GET' && rm) {
-        const id = rm[1];
-        const resultPath = path.join(getMapsQueueDir(), 'results', `${id}.json`);
+      if (req.method === 'GET' && resultRoute) {
+        const id = resultRoute[1];
+        const resultPath = path.join(
+          getMapsQueueDir(),
+          'results',
+          `${id}.json`,
+        );
         if (!fs.existsSync(resultPath)) {
           respondJson(res, 404, { error: 'not-ready' });
           return;

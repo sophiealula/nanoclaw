@@ -16,6 +16,17 @@ Telegram → NanoClaw container → writes save intent → ~/Library/Application
 
 ## Install (one-time)
 
+**Auto-install (recommended):**
+
+```bash
+cd chrome-extensions/maps-saver
+./install.sh
+```
+
+The script opens Chrome, enables Developer mode, clicks Load unpacked, and navigates the file picker automatically via macOS UI scripting. Requires Accessibility access for Terminal (`System Preferences → Privacy & Security → Accessibility`).
+
+**Manual fallback** (if the script misfires):
+
 1. **Make sure NanoClaw is running** (it owns the localhost:7733 queue server).
 2. Open Chrome → `chrome://extensions/`
 3. Top right: toggle **Developer mode** on
