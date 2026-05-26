@@ -1,14 +1,22 @@
 ---
 name: pp-google-maps
-description: Save a place to a Google Maps city list when Soph forwards a recommendation. Use whenever a message reads as a place rec (e.g. "Chloe rec'd Bar Tatu in Mexico City", "save Loulou in Brighton, Eden told me about it", "add the taco place in CDMX"). Drives Google Maps web UI via `agent-browser` using a pre-saved Playwright auth state. Always confirms with Soph before writing — Maps account is live external state.
-allowed-tools: Bash(agent-browser:*), Bash(jq:*), Bash(cat:*), Bash(test:*), Bash(ls:*), Bash(echo:*), Bash(date:*), Bash(rm:*), Bash(mkdir:*), Read, Write, mcp__nanoclaw__send_message
+description: Save a place to a Google Maps city list when Soph forwards a recommendation. Use whenever a message reads as a place rec (e.g. "Chloe rec'd Bar Tatu in Mexico City", "save Loulou in Brighton, Eden told me about it", "add the taco place in CDMX"). The actual save runs in Soph's real Chrome via the NanoClaw Maps Saver extension — this skill enqueues an intent and reports the outcome. Always confirms with Soph before enqueueing.
+allowed-tools: Bash(agent-browser:*), Bash(jq:*), Bash(cat:*), Bash(test:*), Bash(ls:*), Bash(echo:*), Bash(date:*), Bash(rm:*), Bash(mkdir:*), Bash(sleep:*), Read, Write, mcp__nanoclaw__send_message
 ---
 
 # pp-google-maps — save places to Google Maps city lists
 
 When Soph forwards a place recommendation, find or create the right city list on her **personal** Google account and add the place with the recommender captured as a note on the pin.
 
-Mirrors the `pp-instacart` pattern: agent drives the live web UI via `agent-browser` (Playwright). No new CLI — `agent-browser` already supports persistent state, snapshot-driven navigation, and semantic locators.
+**The architecture** (since 2026-05-22):
+1. This skill (in-container) **searches Maps unauthenticated** to verify the place exists + capture the canonical URL/address.
+2. Confirms with Soph via Telegram.
+3. On `yes`, **writes a save intent to the queue dir** (`/home/node/.config/maps-queue/pending/<id>.json`) — that's the bind-mounted host path `~/Library/Application Support/nanoclaw/maps-queue/`.
+4. The host's HTTP server (`src/maps-queue.ts`, port 7733) serves the intent to the **Maps Saver Chrome extension** running in Soph's real Chrome.
+5. Extension opens the place URL, clicks Save, picks the list, fills the note — in Soph's **real signed-in session** — and POSTs the outcome back. The host writes the outcome to `results/<id>.json`.
+6. This skill polls `/home/node/.config/maps-queue/results/<id>.json` for each item, reports per-item outcome via Telegram.
+
+This bypasses every layer of Google's bot detection (no Playwright, no DevTools Protocol, no auth-state mounting drama) because the actual DOM clicks happen inside Soph's real Chrome.
 
 ---
 
@@ -62,40 +70,24 @@ Do NOT guess the city from the place name alone. Bar Tatu exists in Mexico City 
 
 ---
 
-# Section 3 — Auth state
+# Section 3 — Queue health check (replaces the old auth-state preflight)
 
-Soph maintains a logged-in Playwright session for her **personal** Google account.
-
-- Container path: `/home/node/.config/google-maps/state.json` (mounted read-only)
-- Host path (mounted from): `~/Library/Application Support/nanoclaw/google-maps/state.json`
-
-## Canonical command form
-
-Every `agent-browser` invocation in this skill MUST pass `--state /home/node/.config/google-maps/state.json` as the global flag. Standalone `agent-browser state load <path>` does NOT bind the file to the next `open` — the spawned browser context will be unauthenticated and the auth check below will false-flag as "session expired."
-
-Use the literal path, NOT an env-var indirection — that prevents any prior shell-injectable text from re-pointing the load at a different file.
+The actual save runs in Soph's real Chrome via the **Maps Saver extension**. This skill enqueues intents and polls for outcomes. There's no auth state to manage in-container.
 
 ## Pre-flight every run
 
-1. **State file must exist.**
+1. **Queue dir must be mounted.**
    ```bash
-   test -f /home/node/.config/google-maps/state.json || {
-     # Reply: "Maps auth state missing. Next time you're at your Mac, run
-     # ~/projects/nanoclaw/container/skills/pp-google-maps/scripts/login.sh"
+   test -d /home/node/.config/maps-queue/pending || {
+     # Reply: "Maps queue isn't mounted — NanoClaw orchestrator may need a restart."
      exit 1
    }
    ```
-2. **Open Maps with state loaded, then read the account chip.** Single eval covers both "anonymous load" (empty chip) and "wrong account" (chip contains `2389.ai`).
-   ```bash
-   agent-browser --state /home/node/.config/google-maps/state.json open "https://www.google.com/maps"
-   agent-browser wait --load networkidle
-   CHIP=$(agent-browser eval "document.querySelector('a[aria-label*=\"Google Account\"], button[aria-label*=\"Google Account\"], a[aria-label*=\"account\"]')?.getAttribute('aria-label') || ''")
-   ```
-   - `$CHIP` empty → reply: `"Maps loaded logged-out. Run login.sh on your Mac when you're back at it."` STOP.
-   - `$CHIP` contains `2389.ai` → reply: `"Maps is on the work account. Switch to personal on your Mac and re-run login.sh."` STOP.
-   - Otherwise → proceed.
+2. **Tell Soph if the extension isn't loaded.** We can't directly probe the extension from the container (different network namespace), but we CAN detect a stale `pending/` (intents written and never processed). Soft signal — only mention if it's clearly a problem (e.g. when reporting a result timeout in Section 6, not in pre-flight).
 
-If any pre-flight step fails, do NOT attempt to recover from inside the container. Soph re-runs the host login script.
+That's it. No auth check, no account check, no `state.json` ceremony. The extension uses Soph's real Chrome session — whatever account she's signed into is the account that gets the save.
+
+(Past life: this section used to do a Playwright auth check against a mounted `state.json`. That state file expired every few weeks and triggered the 5-step re-auth ceremony. Architecture switch in commit `23efc1b` removed all of that. See `chrome-extensions/maps-saver/README.md` for the new architecture.)
 
 ---
 
@@ -229,7 +221,7 @@ Race-condition note: one pending file per group. If Soph sends a second distinct
 After auth pre-flight (Section 3 — runs ONCE for the whole batch), for EACH place i in the user's message, repeat:
 
 ```bash
-agent-browser --state /home/node/.config/google-maps/state.json open "https://www.google.com/maps/search/<urlencoded query>"
+agent-browser open "https://www.google.com/maps/search/<urlencoded query>"
 agent-browser wait --load networkidle
 agent-browser snapshot -i
 ```
@@ -262,11 +254,13 @@ If `$ADDRESS` is empty, fall back to a snapshot-and-look — the address line is
 
 ---
 
-# Section 6 — Save flow
+# Section 6 — Save flow (via the Maps Saver Chrome extension)
 
 Only reached AFTER Soph replies `yes` to the recap.
 
-## 6a — Read the pending file + iterate items
+This skill does NOT drive a browser anymore. It writes one queue intent per item to `/home/node/.config/maps-queue/pending/`, then polls `/home/node/.config/maps-queue/results/` for each item's outcome. The Maps Saver Chrome extension on Soph's host Mac picks up the intents, does the actual click-Save flow in her real Chrome, and writes outcomes back.
+
+## 6a — Read the pending file
 
 ```bash
 PENDING=/workspace/group/.private/pp-google-maps/pending.json
@@ -281,176 +275,125 @@ LIST_EXISTS=$(jq -r .list_exists "$PENDING")
 ITEM_COUNT=$(jq '.items | length' "$PENDING")
 ```
 
-The save flow below runs ONCE per item. Iterate `0` through `ITEM_COUNT-1`. Per item:
+## 6b — Enqueue each item
+
+For each item in the pending file, write a single JSON file into the queue's `pending/` directory. The extension will pick them up in order (filenames are timestamp-prefixed, so chronological).
 
 ```bash
+QUEUE_PENDING=/home/node/.config/maps-queue/pending
+QUEUE_RESULTS=/home/node/.config/maps-queue/results
+mkdir -p "$QUEUE_PENDING" "$QUEUE_RESULTS"
+
+# Collect IDs so we can poll for them in 6c.
+IDS=()
 for i in $(seq 0 $((ITEM_COUNT - 1))); do
-  PLACE_URL=$(jq -r ".items[$i].place_url" "$PENDING")
-  PLACE_CID=$(jq -r ".items[$i].place_cid" "$PENDING")
-  PLACE_NAME=$(jq -r ".items[$i].place_name" "$PENDING")
-  PLACE_ADDRESS=$(jq -r ".items[$i].place_address" "$PENDING")
-  COMMENT=$(jq -r ".items[$i].note" "$PENDING")
-  # ... do the Section 6b/6c/6d save for this item ...
+  ID="$(date +%s%N)-$i"
+  IDS+=("$ID")
+  jq -n \
+    --arg id "$ID" \
+    --arg place_name "$(jq -r ".items[$i].place_name" "$PENDING")" \
+    --arg place_url  "$(jq -r ".items[$i].place_url"  "$PENDING")" \
+    --arg place_address "$(jq -r ".items[$i].place_address" "$PENDING")" \
+    --arg list_name "$LIST_NAME" \
+    --argjson list_exists "$LIST_EXISTS" \
+    --arg note "$(jq -r ".items[$i].note" "$PENDING")" \
+    --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{id: $id, place_name: $place_name, place_url: $place_url,
+      place_address: $place_address, list_name: $list_name,
+      list_exists: $list_exists, note: $note, created_at: $created_at}' \
+    > "$QUEUE_PENDING/$ID.json.tmp"
+  mv "$QUEUE_PENDING/$ID.json.tmp" "$QUEUE_PENDING/$ID.json"
 done
 ```
 
-**Batch semantics:**
-- The list is created ONCE (first item that triggers list-not-found path). Subsequent items add to the now-existing list.
-- One `yes` covers all items. No per-item confirmation.
-- If item N fails (address mismatch, save not landing, etc.) → STOP the batch, report which items succeeded and which didn't. Do NOT retry within the batch.
-- If item N is already saved (idempotency check returns `saved` in 6b step 1) → skip it, continue to N+1, mention in the final summary.
+Send Soph a "working on it" ack:
+```
+On it — pushing N saves to your real Chrome. Watching for results…
+```
 
-The Section 3 pre-flight runs ONCE at the start, before the loop.
+## 6c — Poll for each item's result
 
-Re-run the pre-flight from Section 3 (state load + auth check), then re-open the place with fallback. The original URL is the fast path; CID and name-search are progressively-more-resilient fallbacks for the case where Maps' session-bound URL segments have rotated:
+The extension processes intents serially. Per-item, expect a result within ~30 seconds (open tab → Maps loads → DOM clicks → close tab). Poll with a per-item timeout of 60 sec.
 
 ```bash
-# Fast path: original URL
-agent-browser --state /home/node/.config/google-maps/state.json open "$PLACE_URL"
-agent-browser wait --load networkidle
-
-# Verify we landed on a place panel (not a search results list / homepage)
-LANDED_NAME=$(agent-browser eval "document.querySelector('main h1, h1[role=\"heading\"]')?.textContent?.trim() || ''")
-if [[ -z "$LANDED_NAME" || "$LANDED_NAME" != *"$PLACE_NAME"* ]]; then
-  # Fallback 1: re-search by name + city
-  Q=$(jq -rn --arg n "$PLACE_NAME" --arg c "$CITY" '"\($n) \($c)"|@uri')
-  agent-browser --state /home/node/.config/google-maps/state.json open "https://www.google.com/maps/search/$Q"
-  agent-browser wait --load networkidle
-  agent-browser find text "$PLACE_NAME" click
-  agent-browser wait --load networkidle
-
-  # Verify the address matches what we recapped — if not, ABORT (we'd be
-  # saving the wrong place). Per Section 7 hard rules.
-  LANDED_ADDR=$(agent-browser eval "document.querySelector('button[data-item-id=\"address\"]')?.textContent?.trim() || ''")
-  if [[ "$LANDED_ADDR" != "$PLACE_ADDRESS" ]]; then
-    # Reply: "The place I just re-opened doesn't match the address I showed
-    # you in the recap. Not saving. Send the rec again — Maps may have
-    # rotated the link or moved the place."
-    rm -f /workspace/group/.private/pp-google-maps/pending.json
-    exit 1
+declare -A OUTCOMES   # ID -> status string
+for ID in "${IDS[@]}"; do
+  RESULT_PATH="$QUEUE_RESULTS/$ID.json"
+  WAITED=0
+  while [[ ! -f "$RESULT_PATH" && $WAITED -lt 60 ]]; do
+    sleep 2
+    WAITED=$((WAITED + 2))
+  done
+  if [[ -f "$RESULT_PATH" ]]; then
+    OUTCOMES[$ID]=$(jq -r '.status' "$RESULT_PATH")
+  else
+    OUTCOMES[$ID]="timeout"
   fi
-fi
+done
 ```
 
-## 6b — Find or create the city list
+**Per-outcome semantics** (status values the extension writes):
+- `"saved"` → ✅ landed cleanly.
+- `"already-saved"` → ⏭ idempotency skip. Place was already on some list (maybe same, maybe different).
+- `"partial"` → ⚠️ save committed but note didn't attach (or list selection landed weird). Treat as success but flag.
+- `"error"` → ❌ something broke. Result file includes `reason` (e.g. "save-button-not-found", "list-picker-dialog-not-found").
+- `"timeout"` → ❌ extension didn't process it within 60s. Most likely cause: extension isn't installed, Chrome isn't running, or NanoClaw queue server isn't reachable.
 
-1. **Idempotency check first.** When a place is ALREADY saved to any of Soph's lists, Maps renders the same action slot as a "Saved" button with `aria-pressed="true"`. Clicking it WOULD UNSAVE the place from its current list — destructive. Read the button state before clicking:
-   ```bash
-   SAVE_STATE=$(agent-browser eval "
-     const b = document.querySelector('[data-tooltip=\"Save\"], button[aria-label*=\"Save\"], button[aria-label*=\"Saved\"]');
-     if (!b) return 'missing';
-     if (b.getAttribute('aria-pressed') === 'true') return 'saved';
-     const label = (b.getAttribute('aria-label') || b.textContent || '').toLowerCase();
-     if (label.startsWith('saved') || label.includes('remove from')) return 'saved';
-     return 'unsaved';
-   ")
-   ```
-   - `saved` → place is already on a list.
-     - **Single-item flow** (TOTAL=1): reply `"Already on your <list-name> list — nothing to do."` Delete the pending file. STOP.
-     - **Batch flow** (TOTAL>1): record this item as ⏭ in the batch report (Section 6e), `continue` to the next iteration. Do NOT delete the pending file. Do NOT stop the batch.
-   - `missing` → see Section 8 row "List-picker UI doesn't appear."
-   - `unsaved` → proceed to the click below.
+## 6d — Clean up + report
 
-2. **Click Save.** Single selector — if Maps drifts, fail loudly via Section 8 rather than cascading and risking the wrong click:
-   ```bash
-   agent-browser find role button click --name "Save"
-   agent-browser snapshot -i
-   ```
-   If the snapshot still shows the place page with no list-picker dialog, abort: see Section 8.
-3. **Pick the list inside the dialog.** Maps renders the list-picker as a `role=dialog` (label `"Save in your lists"`) containing one `role=menuitemcheckbox` per existing list. Each menuitem's accessible name combines list title + place count (e.g. `"Mexico City, 47 places"`). Wait for the dialog before reading:
-   ```bash
-   agent-browser wait --selector '[role="dialog"]' || \
-     agent-browser wait --text "Save in your lists"
-   agent-browser snapshot -i
-   ```
-   List matching is **case-insensitive** when finding existing lists (avoids creating duplicate `Brighton` / `brighton`), but **exact-case as Soph wrote it** when creating new lists.
-   - **Existing list match** → `agent-browser find role menuitemcheckbox click --name "<city>"`. Substring-match means `"Mexico City"` would also match `"Mexico City - Roma"`; if multiple match, prefer the shorter list name.
-   - **No match** → click `New list` (the primary button at the bottom of the dialog), enter the city name as Soph wrote it (preserving `Mexico City` — do NOT auto-shorten to `CDMX`), click Create. (Privacy default is Private since 2023, no explicit toggle needed.)
-
-## 6c — Attach the note (still inside the same dialog)
-
-Important: in current Maps (since ~2024), the note textarea lives **inside the same `role=dialog` opened by step 6b**, expanded after selecting the list. It is NOT on the saved-list view, NOT on the place card, and NOT a separate modal. Do NOT dismiss the dialog before attaching the note — dismissing it commits the save without the note.
-
-After clicking the list (step 6b.3):
-
-1. The dialog expands to show a `textarea` with placeholder `"Add a note"`. Fill it:
-   ```bash
-   agent-browser find role textbox fill "$COMMENT"
-   ```
-2. Close the dialog to commit. Maps auto-saves note + list selection on close — no separate Save button to click (any Save button inside the dialog is for the list selection, not the note, and clicking it after the textbox fill is a no-op):
-   ```bash
-   agent-browser find role button click --name "Done" || \
-     agent-browser keyboard press Escape
-   ```
-3. Wait for the dialog to dismiss before verifying:
-   ```bash
-   agent-browser wait --no-selector '[role="dialog"]'
-   ```
-
-## 6d — Verify
-
-The same Save button you read in 6b's idempotency check should now report `aria-pressed="true"` and its accessible label should change to `"Saved"`:
-
-```bash
-SAVE_STATE=$(agent-browser eval "
-  const b = document.querySelector('button[aria-label*=\"Saved\"], [aria-pressed=\"true\"][data-tooltip=\"Save\"]');
-  return b ? (b.getAttribute('aria-label') || 'saved') : 'unsaved';
-")
-```
-
-If `$SAVE_STATE` is still `unsaved`, the dialog committed without binding to a list — see Section 8 row "List-picker UI doesn't appear" (the save didn't actually land).
-
-## 6e — Clean up pending + reply
+After polling, remove the local pending file (the recap is consumed). Leave the queue's `results/` files in place — the host doesn't auto-prune them, and they're useful evidence if things go wrong.
 
 ```bash
 rm -f /workspace/group/.private/pp-google-maps/pending.json
 ```
 
-**Single-item reply:**
+**Single-item reply** (ITEM_COUNT=1):
 
-```
-Saved <Place Name> to <list name>. Note: "<comment>"
-```
+| outcome | reply |
+|---|---|
+| `saved` (existing list) | `Saved <name> to <list>. Note: "<comment>"` |
+| `saved` (new list created — best-effort signal from result file's `list_created: true`) | `Created new list <list> and saved <name>. Note: "<comment>"` |
+| `already-saved` | `<name> was already on a list — left it where it was.` |
+| `partial` | `Saved <name> to <list>, but couldn't attach the note via UI. Add "<comment>" manually if you want it on the pin.` |
+| `error` | `Couldn't save <name> — <reason>. Try again, or check chrome://extensions/ to make sure Maps Saver is loaded.` |
+| `timeout` | `Maps Saver didn't pick up the save in 60s. Is your Chrome running with the extension installed?` |
 
-Or if a new list was created:
-
-```
-Created new list <list name> and saved <Place Name>. Note: "<comment>"
-```
-
-**Batch reply (N > 1):** report each item's outcome in order. Use ✅ for saved, ⏭ for already-saved (idempotency skip), ❌ for failed.
+**Batch reply (ITEM_COUNT > 1):** report each item's outcome in order with the right emoji.
 
 ```
 Saved <N>/<TOTAL> to <list name>:
 ✅ Puesto La Jolla — "Kari rec'd, good to walk to"
 ✅ Georges at the Cove — "Kari rec'd, outdoor bar"
-⏭ The Cottage La Jolla — already on the list
-❌ Pavilions — address mismatch on re-open; not saved
+⏭ The Cottage La Jolla — already on a list
+❌ Pavilions — error: save-button-not-found
 ```
 
-If the batch was fully successful (all ✅), shorten to:
+If the batch was fully successful (all ✅), shorten:
 
 ```
 Saved all 4 to your San Diego list ✓
 ```
 
-If the batch was fully failed at item 1 (couldn't create list, auth wall, etc.), say so explicitly:
+If everything timed out (extension not running):
 
 ```
-Couldn't save any of the 4 — <reason>. Pending file kept; try again or say `cancel`.
+None of the saves landed — Maps Saver extension isn't picking up the queue.
+Check Chrome is running on your Mac with the extension loaded
+(chrome://extensions/ → look for "NanoClaw Maps Saver" enabled).
+I'll keep the intents in the queue; they'll fire as soon as it's reachable.
 ```
 
-(In the all-fail case, do NOT delete the pending file — Soph can retry.)
+(In the all-fail case, do NOT delete the queued intents — they auto-recover when the extension comes back.)
 
 ---
 
 # Section 7 — Hard rules
 
-- **Confirmation is mandatory before any write.** Section 4. No exceptions.
-- **No retry-loop past 2 attempts on any Maps interaction.** If a click fails twice (snapshot doesn't show the expected next state), STOP and report what you see. Do not iterate against the live UI — risks unintended saves to the wrong list.
-- **Login wall = stop, don't re-auth.** Soph re-authenticates from her laptop using the host ceremony.
-- **Stay on personal account.** If the chip eval returns `2389.ai`, STOP. Do NOT switch accounts from inside the container.
-- **Note on cross-skill trust.** The auth-state mount at `/home/node/.config/google-maps/state.json` holds full Google session cookies. Any other in-container skill with bash access could `cat` this file and exfil the cookies (full account, not just Maps). This is a known limitation accepted for personal-use scope. If you add a new skill that ingests untrusted external content, audit this exposure first.
+- **Confirmation is mandatory before any enqueue.** Section 4. No exceptions.
+- **No retry-loop on queue results.** If an item comes back as `error` or `timeout`, STOP — do NOT re-enqueue. Tell Soph what happened and let her decide. Auto-retry risks duplicate saves if the first one actually landed despite the error response.
+- **The queue is on disk; the extension is the only consumer.** Don't put extension-side concerns (DOM selectors, auth checks) in this skill. Those live in `chrome-extensions/maps-saver/content-script.js`. If the save DOM changes, that's where to patch.
+- **Wrong-account safety lives on the extension side.** This skill doesn't know which Google account Soph is signed into in her Chrome. If she signs into a different account, the saves will go to that account's lists. The extension's popup shows the active account if she clicks it.
+- **The Chrome extension is the only place Maps DOM is driven.** If you find yourself reaching for `agent-browser` to click Maps UI in this skill, stop — that's the bug class we just fixed.
 
 ---
 
@@ -458,8 +401,9 @@ Couldn't save any of the 4 — <reason>. Pending file kept; try again or say `ca
 
 | Failure | Action |
 |---|---|
-| State file missing OR account chip empty OR `2389.ai` in chip | Reply: `"Maps login expired (or wrong account). Next time you're at your Mac: ~/projects/nanoclaw/container/skills/pp-google-maps/scripts/login.sh"` |
-| CAPTCHA / "unusual activity" challenge mid-flow | Reply: `"Maps hit a CAPTCHA. Run login.sh on your Mac to refresh trust."` |
+| Queue dir not mounted (Section 3 pre-flight) | Reply: `"Maps queue not mounted — NanoClaw orchestrator may need a restart."` Don't proceed. |
+| Extension result is `timeout` (no result file after 60s) | Reply: `"Maps Saver extension didn't pick up the save. Check chrome://extensions/ that NanoClaw Maps Saver is loaded + Chrome is running."` Don't re-enqueue (it'll fire whenever the extension comes back). |
+| Extension result is `error` with `reason: "save-button-not-found"` or similar DOM-drift | Reply: `"Maps UI looks different than the extension expected (<reason>). The save didn't land. Try again in a few minutes — Google A/B-tests Maps often."` |
 | Place not found after search | Reply: `"Couldn't find '<place>' in <city>. Different spelling, or got a Maps share link?"` |
 | List-picker UI doesn't appear after Save click (Maps DOM drift) | Reply: `"Maps UI shifted — couldn't find the list picker. Save it manually for now."` |
 | Note field not found inside save dialog | Save to list anyway (better than losing the save), then reply: `"Saved to <list>, but couldn't attach the note. Add '<comment>' manually if you want it on the pin."` |

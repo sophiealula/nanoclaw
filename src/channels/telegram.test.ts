@@ -40,6 +40,7 @@ vi.mock('grammy', () => ({
     api = {
       sendMessage: vi.fn().mockResolvedValue(undefined),
       sendChatAction: vi.fn().mockResolvedValue(undefined),
+      setMessageReaction: vi.fn().mockResolvedValue(undefined),
     };
 
     constructor(token: string) {
@@ -877,6 +878,65 @@ describe('TelegramChannel', () => {
 
       await expect(
         channel.setTyping('tg:100200300', true),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  // --- setReaction ---
+
+  describe('setReaction', () => {
+    it('calls setMessageReaction with a single emoji payload', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.setReaction('tg:100200300', '42', '👀');
+
+      expect(currentBot().api.setMessageReaction).toHaveBeenCalledWith(
+        '100200300',
+        42,
+        [{ type: 'emoji', emoji: '👀' }],
+      );
+    });
+
+    it('clears reactions when emoji is null (empty array)', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.setReaction('tg:100200300', '42', null);
+
+      expect(currentBot().api.setMessageReaction).toHaveBeenCalledWith(
+        '100200300',
+        42,
+        [],
+      );
+    });
+
+    it('skips non-numeric messageIds (other channels reuse the API)', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.setReaction('tg:100200300', 'abc123', '👀');
+
+      expect(currentBot().api.setMessageReaction).not.toHaveBeenCalled();
+    });
+
+    it('swallows API errors — reactions are best-effort UX, never throw', async () => {
+      // Why: Telegram returns 400 for invalid emoji choices, expired messages,
+      // and non-premium-bot restrictions. We never want a reaction failure to
+      // bubble up and abort the inbound-message processing pipeline.
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      currentBot().api.setMessageReaction.mockRejectedValueOnce(
+        new Error('REACTION_INVALID'),
+      );
+
+      await expect(
+        channel.setReaction('tg:100200300', '42', '👀'),
       ).resolves.toBeUndefined();
     });
   });

@@ -272,6 +272,22 @@ function shouldClose(): boolean {
 }
 
 /**
+ * Strip lone UTF-16 surrogate code points from a string. These break JSON
+ * serialization (Anthropic API returns "no low surrogate in string" 400 errors
+ * when an unpaired high surrogate is sent in a request body). High surrogates
+ * (\uD800-\uDBFF) must be followed by low surrogates (\uDC00-\uDFFF); anything
+ * else is invalid Unicode and almost always indicates a copy-paste / encoding
+ * error in upstream content (emails, scraped pages, etc.).
+ */
+function sanitizeUnicode(s: string): string {
+  // Replace any lone high surrogate not followed by a low surrogate, and any
+  // lone low surrogate not preceded by a high surrogate.
+  return s
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, "�")
+    .replace(/(^|[^\uD800-\uDBFF])([\uDC00-\uDFFF])/g, "$1�");
+}
+
+/**
  * Drain all pending IPC input messages.
  * Returns messages found, or empty array.
  */
@@ -289,7 +305,7 @@ function drainIpcInput(): string[] {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         fs.unlinkSync(filePath);
         if (data.type === 'message' && data.text) {
-          messages.push(data.text);
+          messages.push(sanitizeUnicode(data.text));
         }
       } catch (err) {
         log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
@@ -340,7 +356,7 @@ async function runQuery(
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+  stream.push(sanitizeUnicode(prompt));
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -357,7 +373,7 @@ async function runQuery(
     const messages = drainIpcInput();
     for (const text of messages) {
       log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
+      stream.push(text); // already sanitized in drainIpcInput
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
@@ -391,6 +407,30 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  // Load project .mcp.json for additional MCP servers (gsuite, etc.)
+  const projectMcpPath = '/workspace/group/.mcp.json';
+  const projectMcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }> = {};
+  const projectMcpToolPatterns: string[] = [];
+  if (fs.existsSync(projectMcpPath)) {
+    try {
+      const mcpJson = JSON.parse(fs.readFileSync(projectMcpPath, 'utf-8'));
+      if (mcpJson.mcpServers) {
+        for (const [name, config] of Object.entries(mcpJson.mcpServers)) {
+          const serverConfig = config as typeof projectMcpServers[string];
+          // SDK replaces process.env when `env` is set, so merge to preserve PATH/HOME/etc.
+          if (serverConfig.env) {
+            serverConfig.env = { ...process.env as Record<string, string>, ...serverConfig.env };
+          }
+          projectMcpServers[name] = serverConfig;
+          projectMcpToolPatterns.push(`mcp__${name}__*`);
+          log(`Loaded MCP server from .mcp.json: ${name}`);
+        }
+      }
+    } catch (err) {
+      log(`Failed to load .mcp.json: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -409,7 +449,8 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        ...projectMcpToolPatterns,
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -425,6 +466,7 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...projectMcpServers,
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
@@ -541,6 +583,45 @@ async function main(): Promise<void> {
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+
+  // Skill-mtime invalidation: the Claude SDK caches the result of a Skill tool
+  // call in the session jsonl (as an isMeta:true tool_result on first
+  // invocation) and replays it verbatim on every resume. That means a SKILL.md
+  // edited on disk between turns is INVISIBLE to the model — it keeps
+  // operating from the cached body. If any SKILL.md is newer than the session
+  // start, drop the sessionId so a fresh session is created and skills are
+  // re-read from disk.
+  if (sessionId) {
+    try {
+      const skillsRoot = '/home/node/.claude/skills';
+      const projectDir = '/home/node/.claude/projects/-workspace-group';
+      const jsonlPath = path.join(projectDir, `${sessionId}.jsonl`);
+      if (fs.existsSync(jsonlPath) && fs.existsSync(skillsRoot)) {
+        const sessionStartMs = (fs.statSync(jsonlPath).birthtimeMs
+          || fs.statSync(jsonlPath).ctimeMs);
+        const walk = (dir: string): string[] => {
+          const out: string[] = [];
+          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+              out.push(...walk(full));
+            } else if (entry.isFile() && entry.name === 'SKILL.md') {
+              out.push(full);
+            }
+          }
+          return out;
+        };
+        const newerSkill = walk(skillsRoot).find((f) =>
+          fs.statSync(f).mtimeMs > sessionStartMs);
+        if (newerSkill) {
+          log(`SKILL.md newer than session ${sessionId} (${newerSkill}); starting fresh session so skill updates take effect`);
+          sessionId = undefined;
+        }
+      }
+    } catch (err) {
+      log(`skill-mtime check failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   // Clean up stale _close sentinel from previous container runs
   try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }

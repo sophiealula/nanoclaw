@@ -63,6 +63,16 @@ export const MAX_MESSAGES_PER_PROMPT = Math.max(
 );
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
+// If a user's message hasn't gotten any reply within LONG_TASK_REACTION_MS,
+// swap the 👀 receipt reaction to LONG_TASK_REACTION_EMOJI so the sender sees
+// "still working" instead of "saw it then went quiet". Telegram bots can only
+// use approved reaction emoji — ✍ is on the free list, ⏳ isn't.
+export const LONG_TASK_REACTION_MS = parseInt(
+  process.env.LONG_TASK_REACTION_MS || '15000',
+  10,
+);
+export const LONG_TASK_REACTION_EMOJI =
+  process.env.LONG_TASK_REACTION_EMOJI || '✍';
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,

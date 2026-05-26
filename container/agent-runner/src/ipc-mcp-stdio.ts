@@ -15,6 +15,20 @@ const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 
+// Surrogate-safe truncation. `String#slice` counts UTF-16 code units, so
+// cutting at a boundary that lands inside a surrogate pair (any emoji whose
+// codepoint is > U+FFFF) leaves an orphan high surrogate. That orphan gets
+// JSON-escaped into the transcript and re-sent verbatim on every session
+// resume, where Anthropic's JSON parser rejects it as
+// `no low surrogate in string` 400. Trim one extra char when the cut lands
+// on a high surrogate.
+function safeSlice(s: string, n: number): string {
+  if (s.length <= n) return s;
+  const lastChar = s.charCodeAt(n - 1);
+  const end = lastChar >= 0xd800 && lastChar <= 0xdbff ? n - 1 : n;
+  return s.slice(0, end);
+}
+
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
@@ -179,7 +193,7 @@ server.tool(
       const formatted = tasks
         .map(
           (t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) =>
-            `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
+            `- [${t.id}] ${safeSlice(t.prompt, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
         )
         .join('\n');
 
@@ -334,6 +348,47 @@ Use available_groups.json to find the JID for a group. The folder name must be c
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
     };
+  },
+);
+
+server.tool(
+  'edit_obsidian',
+  `Edit or create a file in Soph's Obsidian vault via the host. Use this instead of writing to /workspace/extra/ directories directly — direct writes cause sync conflicts.
+
+Actions:
+• "check_off" — Find a checkbox item matching the search string and mark it done: - [ ] → - [x] ✅ YYYY-MM-DD
+• "add_line" — Insert a new line after the line matching "after". If "after" is omitted, appends to end of file.
+• "replace_line" — Find the line matching "match" and replace it with "line".
+• "create_file" — Create a new file with the given content. Fails if file already exists.
+
+The "dir" parameter selects which mounted directory to write to (e.g. "weekly", "people", "research", "notes", "projects", "concepts", "findings").`,
+  {
+    action: z.enum(['check_off', 'add_line', 'replace_line', 'create_file']).describe('The edit action to perform'),
+    dir: z.string().describe('Mount name (e.g. "weekly", "concepts", "people")'),
+    file: z.string().describe('Filename within the directory (e.g. "Week 2026-03-17.md")'),
+    content: z.string().optional().describe('For create_file: full file content'),
+    match: z.string().optional().describe('Text to search for (check_off: checkbox text to match, replace_line: line to find)'),
+    after: z.string().optional().describe('For add_line: insert after the line containing this text. Omit to append to end.'),
+    line: z.string().optional().describe('For add_line/replace_line: the new line content'),
+  },
+  async (args) => {
+    const data = {
+      type: 'obsidian_write',
+      action: args.action,
+      dir: args.dir,
+      file: args.file,
+      content: args.content,
+      match: args.match,
+      after: args.after,
+      line: args.line,
+      groupFolder,
+      isMain: String(isMain),
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Obsidian edit queued: ${args.action} in ${args.file}` }] };
   },
 );
 

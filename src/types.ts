@@ -66,6 +66,7 @@ export interface ScheduledTask {
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;
+  retry_count: number;
   status: 'active' | 'paused' | 'completed';
   created_at: string;
 }
@@ -90,6 +91,15 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: emoji reaction on a user's message. emoji=null clears all reactions.
+  // Channels without native reaction support can omit. Implementations should
+  // swallow per-message errors (invalid emoji, no permission, etc.) — reactions
+  // are best-effort UX, never a hard failure.
+  setReaction?(
+    jid: string,
+    messageId: string,
+    emoji: string | null,
+  ): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
 }

@@ -52,9 +52,21 @@ export function readonlyMountArgs(
   hostPath: string,
   containerPath: string,
 ): string[] {
+  return bindMountArgs(hostPath, containerPath, true);
+}
+
+/**
+ * Returns CLI args for a bind mount. Always uses `--mount` (not `-v`) so paths
+ * containing spaces or commas parse unambiguously across runtimes.
+ */
+export function bindMountArgs(
+  hostPath: string,
+  containerPath: string,
+  readonly: boolean,
+): string[] {
   return [
     '--mount',
-    `type=bind,source=${hostPath},target=${containerPath},readonly`,
+    `type=bind,source=${hostPath},target=${containerPath}${readonly ? ',readonly' : ''}`,
   ];
 }
 

@@ -42,7 +42,10 @@ export function formatLocalTime(utcIso: string, timezone: string): string {
  * Used by the context header so the agent doesn't have to compute
  * day-of-week from a bare date (which it occasionally gets wrong).
  */
-export function formatTodayInTimezone(timezone: string, now: Date = new Date()): string {
+export function formatTodayInTimezone(
+  timezone: string,
+  now: Date = new Date(),
+): string {
   return now.toLocaleDateString('en-US', {
     timeZone: resolveTimezone(timezone),
     weekday: 'long',

@@ -100,6 +100,15 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add retry_count column for task retry-on-error support
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN retry_count INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
@@ -389,12 +398,14 @@ export function getLastBotMessageTimestamp(
 }
 
 export function createTask(
-  task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
+  task: Omit<ScheduledTask, 'last_run' | 'last_result' | 'retry_count'> & {
+    retry_count?: number;
+  },
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, script, schedule_type, schedule_value, context_mode, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, script, schedule_type, schedule_value, context_mode, next_run, retry_count, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
@@ -406,6 +417,7 @@ export function createTask(
     task.schedule_value,
     task.context_mode || 'isolated',
     task.next_run,
+    task.retry_count || 0,
     task.status,
     task.created_at,
   );
@@ -504,15 +516,17 @@ export function updateTaskAfterRun(
   id: string,
   nextRun: string | null,
   lastResult: string,
+  retryCount = 0,
 ): void {
   const now = new Date().toISOString();
   db.prepare(
     `
     UPDATE scheduled_tasks
-    SET next_run = ?, last_run = ?, last_result = ?, status = CASE WHEN ? IS NULL THEN 'completed' ELSE status END
+    SET next_run = ?, last_run = ?, last_result = ?, retry_count = ?,
+        status = CASE WHEN ? IS NULL THEN 'completed' ELSE status END
     WHERE id = ?
   `,
-  ).run(nextRun, now, lastResult, nextRun, id);
+  ).run(nextRun, now, lastResult, retryCount, nextRun, id);
 }
 
 export function logTaskRun(log: TaskRunLog): void {

@@ -19,6 +19,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { isRawTransportError } from './transport-error.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 /**
@@ -60,6 +61,35 @@ export function computeNextRun(task: ScheduledTask): string | null {
   }
 
   return null;
+}
+
+const TASK_MAX_RETRIES = 3;
+const TASK_RETRY_BASE_MS = 5 * 60_000; // 5 minutes
+
+/**
+ * Decide next_run and retry_count after a task run.
+ * On success: advance to next scheduled time, reset retries.
+ * On error with retries remaining: schedule retry with exponential backoff.
+ * On error with retries exhausted: advance to next scheduled time, reset retries.
+ */
+export function computeRetryOrNextRun(
+  task: ScheduledTask,
+  isError: boolean,
+): { next_run: string | null; retry_count: number } {
+  if (!isError) {
+    return { next_run: computeNextRun(task), retry_count: 0 };
+  }
+
+  if (task.retry_count < TASK_MAX_RETRIES) {
+    const backoff = TASK_RETRY_BASE_MS * Math.pow(2, task.retry_count);
+    return {
+      next_run: new Date(Date.now() + backoff).toISOString(),
+      retry_count: task.retry_count + 1,
+    };
+  }
+
+  // Retries exhausted — give up and advance to next scheduled time
+  return { next_run: computeNextRun(task), retry_count: 0 };
 }
 
 export interface SchedulerDependencies {
@@ -186,9 +216,19 @@ async function runTask(
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
-          result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          if (isRawTransportError(streamedOutput.result)) {
+            // Transport-level Anthropic error (529/400/etc) — never spam the
+            // user with raw error envelopes. Route to the error/retry path.
+            error = streamedOutput.result.slice(0, 200);
+            logger.warn(
+              { taskId: task.id, snippet: streamedOutput.result.slice(0, 120) },
+              'Suppressed raw API error from scheduled-task user notification',
+            );
+          } else {
+            result = streamedOutput.result;
+            // Forward result to user (sendMessage handles formatting)
+            await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          }
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
@@ -231,13 +271,30 @@ async function runTask(
     error,
   });
 
-  const nextRun = computeNextRun(task);
+  const isError = !!error;
+  const { next_run: nextRun, retry_count: retryCount } = computeRetryOrNextRun(
+    task,
+    isError,
+  );
+
+  if (isError && retryCount > 0) {
+    logger.info(
+      { taskId: task.id, retryCount, maxRetries: TASK_MAX_RETRIES, nextRun },
+      'Task failed, scheduling retry',
+    );
+  } else if (isError) {
+    logger.warn(
+      { taskId: task.id },
+      'Task failed after max retries, advancing to next scheduled time',
+    );
+  }
+
   const resultSummary = error
     ? `Error: ${error}`
     : result
       ? result.slice(0, 200)
       : 'Completed';
-  updateTaskAfterRun(task.id, nextRun, resultSummary);
+  updateTaskAfterRun(task.id, nextRun, resultSummary, retryCount);
 }
 
 let schedulerRunning = false;

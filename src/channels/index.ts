@@ -10,4 +10,7 @@
 // telegram
 import './telegram.js';
 
+// twilio-voice
+import './twilio-voice.js';
+
 // whatsapp

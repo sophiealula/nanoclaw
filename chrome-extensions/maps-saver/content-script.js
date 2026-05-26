@@ -59,33 +59,118 @@
   }
 
   function findSavedDialog() {
-    // The list-picker is a role=dialog. Its aria-label varies but always
-    // contains "Save" (e.g. "Save in your lists").
-    const dialogs = document.querySelectorAll('[role="dialog"]');
-    for (const d of dialogs) {
+    // Strict: only return dialogs whose aria-label clearly identifies the picker.
+    // The previous fallback to "last dialog" was matching the zoom slider —
+    // that whole class of false positive is gone here.
+    const candidates = document.querySelectorAll('[role="dialog"], [aria-modal="true"]');
+    for (const d of candidates) {
       const label = (d.getAttribute('aria-label') || '').toLowerCase();
-      if (label.includes('save')) return d;
+      if (label.includes('save') && (label.includes('list') || label.includes('place'))) return d;
     }
-    // Fallback: pick the most recently-opened visible dialog.
-    return dialogs[dialogs.length - 1] || null;
+    return null;
+  }
+
+  function findListPickerByContent() {
+    // Real Maps picker has "New list" text AND at least one of the system lists
+    // (Want to go / Favorites / Starred). Find the smallest visible container
+    // matching both — that's our picker, regardless of ARIA role.
+    function isVisible(el) {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && el.offsetParent !== null;
+    }
+    const candidates = document.querySelectorAll('div, ul, section, aside');
+    let best = null;
+    for (const el of candidates) {
+      if (!isVisible(el)) continue;
+      const text = el.innerText || '';
+      if (
+        text.includes('New list') &&
+        (text.includes('Want to go') || text.includes('Favorites') || text.includes('Starred'))
+      ) {
+        if (!best || best.contains(el)) best = el;
+      }
+    }
+    return best;
   }
 
   function listMenuItems(dialog) {
-    // Each existing list is a role=menuitemcheckbox inside the dialog.
-    return Array.from(dialog.querySelectorAll('[role="menuitemcheckbox"]'));
+    // Maps' picker A/B-tests roles. Cast wide; dedupe by element identity.
+    const selectors = [
+      '[role="menuitemcheckbox"]',
+      '[role="checkbox"]',
+      '[role="menuitem"]',
+      '[role="option"]',
+      'li[role]',
+      'button',
+    ];
+    const items = [];
+    const seen = new Set();
+    for (const sel of selectors) {
+      for (const el of dialog.querySelectorAll(sel)) {
+        if (seen.has(el)) continue;
+        // Skip obvious non-list items: New list / Cancel / Done / etc.
+        const label = (el.getAttribute('aria-label') || el.textContent || '').trim().toLowerCase();
+        if (/^(new list|create|cancel|close|done|back|show slider|hide slider|search|filter)$/i.test(label)) continue;
+        // Skip non-checkbox icons that are too small / probably not list rows
+        const r = el.getBoundingClientRect();
+        if (r.width < 50 || r.height < 20) continue;
+        seen.add(el);
+        items.push(el);
+      }
+    }
+    return items;
+  }
+
+  function dumpPickerItems(dialog) {
+    return listMenuItems(dialog).slice(0, 30).map((el) => ({
+      tag: el.tagName.toLowerCase(),
+      role: el.getAttribute('role'),
+      name: (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 80),
+    }));
   }
 
   function findListByName(dialog, listName) {
     const target = listName.trim().toLowerCase();
-    let exact = null, partial = null;
+    let exact = null, prefix = null, contains = null;
     for (const item of listMenuItems(dialog)) {
-      const name = (item.getAttribute('aria-label') || item.textContent || '').trim().toLowerCase();
-      // Strip trailing " , N places" suffix Maps appends
-      const stripped = name.replace(/,\s*\d+\s+places?$/, '').trim();
+      const raw = (item.getAttribute('aria-label') || item.textContent || '').trim().toLowerCase();
+      // Strip ", N places" / "(N)" suffixes Maps appends
+      const stripped = raw.replace(/,\s*\d+\s+(places?|saved)\s*$/, '').replace(/\s*\(\d+\)\s*$/, '').trim();
       if (stripped === target) { exact = item; break; }
-      if (stripped.startsWith(target) && !partial) partial = item;
+      if (stripped.startsWith(target) && !prefix) prefix = item;
+      if (stripped.includes(target) && !contains) contains = item;
     }
-    return exact || partial;
+    return exact || prefix || contains;
+  }
+
+  async function findOrRevealList(dialog, listName) {
+    // 1. Direct match first
+    let item = findListByName(dialog, listName);
+    if (item) return item;
+
+    // 2. If picker has a search/filter input, type the name in
+    const filter = dialog.querySelector(
+      'input[type="search"], input[type="text"][placeholder*="search" i], input[type="text"][placeholder*="filter" i], input[role="combobox"]'
+    );
+    if (filter) {
+      setNativeValue(filter, listName);
+      await sleep(800);
+      item = findListByName(dialog, listName);
+      if (item) return item;
+    }
+
+    // 3. If picker is scrollable, scroll to bottom (older lists may be lazy-loaded)
+    const scrollers = [dialog, ...dialog.querySelectorAll('[class*="scroll"], [style*="overflow"]')];
+    for (const s of scrollers) {
+      try {
+        s.scrollTop = s.scrollHeight;
+      } catch {}
+    }
+    await sleep(600);
+    item = findListByName(dialog, listName);
+    if (item) return item;
+
+    return null;
   }
 
   function findNewListButton(dialog) {
@@ -145,53 +230,37 @@
         return { status: 'already-saved' };
       }
 
-      // 3. Click Save → wait for the list-picker dialog.
-      await clickAndWait(saveBtn, 700);
-      const dialog = await waitFor(findSavedDialog, { timeout: 5000 });
+      // 3. Click Save → wait for the list-picker (NOT necessarily a role=dialog
+      // — Maps' picker is often a plain div with menuitemcheckbox children).
+      // Use content-based detection: find a visible container that includes
+      // both "Want to go" / "Favorites" / "Starred" AND "New list".
+      await clickAndWait(saveBtn, 1000);
+      const dialog = await waitFor(
+        () => findSavedDialog() || findListPickerByContent(),
+        { timeout: 10000 },
+      );
       if (!dialog) {
-        return { status: 'error', reason: 'list-picker-dialog-not-found' };
+        return { status: 'error', reason: 'list-picker-not-found' };
       }
+      // Let lazy children settle
+      await sleep(800);
 
-      // 4. Pick or create the list.
-      let listItem = findListByName(dialog, item.list_name);
+      // 4. Find the existing list by name. **Hard rule: never auto-create
+      // a duplicate.** If we can't find the target list, ABORT — don't fall
+      // through to "create new list" silently. Sophie would rather see an
+      // error than wake up to 3 duplicate San Diego lists.
+      let listItem = await findOrRevealList(dialog, item.list_name);
       if (!listItem) {
-        // Need to create a new list.
-        const newListBtn = findNewListButton(dialog);
-        if (!newListBtn) {
-          return { status: 'error', reason: 'new-list-button-not-found' };
-        }
-        await clickAndWait(newListBtn, 500);
-        // After "New list" click, a fresh dialog/section appears with a text
-        // input for the list name. Find the first text input in the dialog
-        // (or the page), fill the list name, click "Create" / "Save".
-        const nameInput = await waitFor(
-          () => document.querySelector('input[type="text"]:not([disabled]), [role="textbox"][contenteditable="true"]'),
-          { timeout: 3000 },
-        );
-        if (!nameInput) {
-          return { status: 'error', reason: 'new-list-name-input-not-found' };
-        }
-        setNativeValue(nameInput, item.list_name);
-        await sleep(300);
-        // Find a "Create" or "Save" button on the new-list form.
-        const submit = Array.from(document.querySelectorAll('button')).find((b) => {
-          const label = (b.getAttribute('aria-label') || b.textContent || '').trim().toLowerCase();
-          return label === 'create' || label === 'save';
-        });
-        if (!submit) {
-          return { status: 'error', reason: 'new-list-create-button-not-found' };
-        }
-        await clickAndWait(submit, 700);
-        // After creation, the picker re-opens (or we're already saved into it).
-        // Re-find the dialog + the list item to verify.
-        await waitFor(() => {
-          const d = findSavedDialog();
-          return d && findListByName(d, item.list_name);
-        }, { timeout: 5000 });
-      } else {
-        // Existing list — tick it.
-        await clickAndWait(listItem, 600);
+        // Diagnostic dump so Sophie can see what the picker actually shows
+        return {
+          status: 'error',
+          reason: 'list-not-found-in-picker',
+          looked_for: item.list_name,
+          visible_lists: dumpPickerItems(dialog).slice(0, 25),
+          hint: 'Maps picker may have hidden the list (only shows recent). Save manually to bump it to "recent", or rename the list to match exactly.',
+        };
       }
+      await clickAndWait(listItem, 700);
 
       // 5. Fill the note (still in the same dialog).
       const liveDialog = findSavedDialog();

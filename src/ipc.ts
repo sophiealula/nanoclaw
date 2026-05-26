@@ -8,6 +8,7 @@ import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { isRawTransportError } from './transport-error.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -23,6 +24,215 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   onTasksChanged: () => void;
+}
+
+/**
+ * Resolve a container mount name to its host path using the group's
+ * additionalMounts config.
+ *
+ * Lookup order:
+ *   1. Exact containerPath match (e.g. dir="findings" → findings mount)
+ *   2. Subpath under a "vault" mount (e.g. dir="People" → vault.hostPath/People,
+ *      dir="Reference/Inactive" → vault.hostPath/Reference/Inactive)
+ *
+ * Path traversal ("..") is blocked for vault subpaths.
+ */
+function resolveObsidianHostPath(
+  dir: string,
+  group: RegisteredGroup,
+): string | null {
+  const mounts = group.containerConfig?.additionalMounts;
+  if (!mounts) return null;
+
+  const exact = mounts.find((m) => m.containerPath === dir);
+  if (exact) return exact.hostPath;
+
+  const vault = mounts.find((m) => m.containerPath === 'vault');
+  if (!vault) return null;
+
+  const candidate = path.resolve(vault.hostPath, dir);
+  const vaultRoot = path.resolve(vault.hostPath);
+  if (candidate !== vaultRoot && !candidate.startsWith(vaultRoot + path.sep)) {
+    return null;
+  }
+  return candidate;
+}
+
+/**
+ * Process an obsidian_write IPC command on the host filesystem.
+ * The host writes directly — no sync conflicts since we're the native writer.
+ */
+function processObsidianWrite(
+  data: {
+    action: string;
+    dir: string;
+    file: string;
+    content?: string;
+    match?: string;
+    after?: string;
+    line?: string;
+    groupFolder: string;
+  },
+  registeredGroups: Record<string, RegisteredGroup>,
+): void {
+  // Find the group that owns this folder
+  const group = Object.values(registeredGroups).find(
+    (g) => g.folder === data.groupFolder,
+  );
+  if (!group) {
+    logger.warn(
+      { groupFolder: data.groupFolder },
+      'Obsidian write: group not found',
+    );
+    return;
+  }
+
+  const hostDir = resolveObsidianHostPath(data.dir, group);
+  if (!hostDir) {
+    logger.warn(
+      { dir: data.dir, groupFolder: data.groupFolder },
+      'Obsidian write: mount not found for dir',
+    );
+    return;
+  }
+
+  const filePath = path.join(hostDir, data.file);
+
+  // create_file is handled separately — file must NOT already exist
+  if (data.action === 'create_file') {
+    if (!data.content) {
+      logger.warn({ filePath }, 'Obsidian create_file: no content provided');
+      return;
+    }
+    if (fs.existsSync(filePath)) {
+      logger.warn(
+        { filePath },
+        'Obsidian create_file: file already exists, skipping',
+      );
+      return;
+    }
+    // Prevent path traversal
+    const resolved = path.resolve(filePath);
+    if (!resolved.startsWith(path.resolve(hostDir))) {
+      logger.warn(
+        { filePath, hostDir },
+        'Obsidian create_file: path traversal blocked',
+      );
+      return;
+    }
+    const lockPath = `${filePath}.lock`;
+    try {
+      const fd = fs.openSync(lockPath, 'wx');
+      fs.closeSync(fd);
+    } catch {
+      logger.warn({ filePath }, 'Obsidian create_file: lock held, skipping');
+      return;
+    }
+    try {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, data.content);
+      logger.info({ file: data.file, dir: data.dir }, 'Obsidian: created file');
+    } finally {
+      fs.unlinkSync(lockPath);
+    }
+    return;
+  }
+
+  if (!fs.existsSync(filePath)) {
+    logger.warn({ filePath }, 'Obsidian write: file not found');
+    return;
+  }
+
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const lines = content.split('\n');
+  let modified = false;
+
+  switch (data.action) {
+    case 'check_off': {
+      if (!data.match) break;
+      const searchLower = data.match.toLowerCase();
+      const today = new Date().toISOString().split('T')[0];
+      for (let i = 0; i < lines.length; i++) {
+        if (
+          lines[i].includes('- [ ]') &&
+          lines[i].toLowerCase().includes(searchLower)
+        ) {
+          lines[i] = lines[i].replace('- [ ]', `- [x] ✅ ${today}`);
+          modified = true;
+          logger.info(
+            { file: data.file, line: i + 1, match: data.match },
+            'Obsidian: checked off item',
+          );
+          break;
+        }
+      }
+      if (!modified) {
+        logger.warn(
+          { file: data.file, match: data.match },
+          'Obsidian check_off: no matching unchecked item found',
+        );
+      }
+      break;
+    }
+    case 'add_line': {
+      if (!data.line) break;
+      if (data.after) {
+        const afterLower = data.after.toLowerCase();
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].toLowerCase().includes(afterLower)) {
+            lines.splice(i + 1, 0, data.line);
+            modified = true;
+            logger.info(
+              { file: data.file, after: data.after },
+              'Obsidian: inserted line',
+            );
+            break;
+          }
+        }
+      } else {
+        lines.push(data.line);
+        modified = true;
+        logger.info({ file: data.file }, 'Obsidian: appended line');
+      }
+      break;
+    }
+    case 'replace_line': {
+      if (!data.match || !data.line) break;
+      const matchLower = data.match.toLowerCase();
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].toLowerCase().includes(matchLower)) {
+          lines[i] = data.line;
+          modified = true;
+          logger.info(
+            { file: data.file, line: i + 1 },
+            'Obsidian: replaced line',
+          );
+          break;
+        }
+      }
+      break;
+    }
+  }
+
+  if (modified) {
+    // Lock to prevent concurrent writes from duplicate instances
+    const lockPath = `${filePath}.lock`;
+    try {
+      const fd = fs.openSync(lockPath, 'wx');
+      fs.closeSync(fd);
+    } catch {
+      logger.warn(
+        { filePath },
+        'Obsidian write: lock held by another process, skipping',
+      );
+      return;
+    }
+    try {
+      fs.writeFileSync(filePath, lines.join('\n'));
+    } finally {
+      fs.unlinkSync(lockPath);
+    }
+  }
 }
 
 let ipcWatcherRunning = false;
@@ -81,11 +291,25 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'IPC message sent',
-                  );
+                  // Defensive: if an agent or script writes a raw SDK
+                  // transport-error envelope into an IPC message (intentional
+                  // or accidental), never forward it to the user channel.
+                  if (isRawTransportError(data.text)) {
+                    logger.warn(
+                      {
+                        chatJid: data.chatJid,
+                        sourceGroup,
+                        snippet: data.text.slice(0, 120),
+                      },
+                      'Suppressed raw API error from IPC-forwarded message',
+                    );
+                  } else {
+                    await deps.sendMessage(data.chatJid, data.text);
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup },
+                      'IPC message sent',
+                    );
+                  }
                 } else {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
@@ -166,6 +390,14 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
+    // For obsidian_write
+    action?: string;
+    dir?: string;
+    file?: string;
+    content?: string;
+    match?: string;
+    after?: string;
+    line?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -441,9 +673,9 @@ export async function processTaskIpc(
           );
           break;
         }
-        // Defense in depth: agent cannot set isMain via IPC.                                                                                                                                    
-        // Preserve isMain from the existing registration so IPC config                                                                                                                          
-        // updates (e.g. adding additionalMounts) don't strip the flag.                                                                                                                          
+        // Defense in depth: agent cannot set isMain via IPC.
+        // Preserve isMain from the existing registration so IPC config
+        // updates (e.g. adding additionalMounts) don't strip the flag.
         const existingGroup = registeredGroups[data.jid];
         deps.registerGroup(data.jid, {
           name: data.name,
@@ -460,6 +692,13 @@ export async function processTaskIpc(
           'Invalid register_group request - missing required fields',
         );
       }
+      break;
+
+    case 'obsidian_write':
+      processObsidianWrite(
+        data as unknown as Parameters<typeof processObsidianWrite>[0],
+        registeredGroups,
+      );
       break;
 
     default:

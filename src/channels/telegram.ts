@@ -303,6 +303,49 @@ export class TelegramChannel implements Channel {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
     }
   }
+
+  async setReaction(
+    jid: string,
+    messageId: string,
+    emoji: string | null,
+  ): Promise<void> {
+    if (!this.bot) return;
+    const numericId = jid.replace(/^tg:/, '');
+    const msgIdNum = parseInt(messageId, 10);
+    if (!Number.isFinite(msgIdNum)) {
+      logger.debug(
+        { jid, messageId },
+        'setReaction: non-numeric messageId, skipping',
+      );
+      return;
+    }
+    try {
+      // emoji=null clears the reaction (empty array).
+      // Cast: grammy's type narrows emoji to Telegram's literal-union of ~70
+      // allowed reactions; we accept any string and let the API reject the
+      // invalid ones (caught below). Caller's responsibility to pass a
+      // platform-approved emoji (👀 👍 ❤ 🔥 🤔 etc).
+      const reaction =
+        emoji === null
+          ? []
+          : ([{ type: 'emoji' as const, emoji }] as Parameters<
+              NonNullable<typeof this.bot>['api']['setMessageReaction']
+            >[2]);
+      await this.bot.api.setMessageReaction(numericId, msgIdNum, reaction);
+    } catch (err) {
+      // Best-effort: bad emoji, message too old, or no permission → debug log,
+      // do not raise. Reactions are UX sugar, never a hard failure.
+      logger.debug(
+        {
+          jid,
+          messageId,
+          emoji,
+          err: err instanceof Error ? err.message : err,
+        },
+        'Failed to set Telegram reaction',
+      );
+    }
+  }
 }
 
 registerChannel('telegram', (opts: ChannelOpts) => {
