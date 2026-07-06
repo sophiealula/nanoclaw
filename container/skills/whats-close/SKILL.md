@@ -14,10 +14,10 @@ Sophie pings a location from Telegram; you tell her which of HER places are near
    - **Text location**: if she names where she is ("near St-Laurent and Duluth", "at Café Olimpico", an address), geocode it:
 
      ```bash
-     curl -s -A "nanoclaw-whats-close/1.0" "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=<url-encoded query, include the city>"
+     curl -s -A "nanoclaw-whats-close/1.0" "https://nominatim.openstreetmap.org/search?format=json&limit=3&q=<url-encoded query, include the city>"
      ```
 
-     Always include the city (from trip context/calendar if she didn't say). Echo the resolved spot back ("assuming you're near X") so a bad geocode is visible. If the query returns nothing, ask rather than guess.
+     Always include the city (from trip context/calendar if she didn't say). Nominatim is error-prone — verified traps: street intersections ("X and Y") return nothing; borough/district names hijack street matches (e.g. "Boulevard Saint-Laurent, Montréal" can land in the Saint-Laurent borough); chain/multi-location venues return an arbitrary branch. So: request `limit=3`, check the `display_name`s actually match what she said, and if results are ambiguous or the venue has multiple locations, ask her which one instead of picking. ALWAYS echo the resolved spot back ("assuming you're near X — …") so a bad geocode is visible. If nothing plausible comes back, ask for a nearby landmark or venue name rather than guessing.
    - **Neither**: reply with exactly this and end your turn — her answer arrives as a new message that triggers you again:
 
 ```
