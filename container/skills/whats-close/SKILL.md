@@ -15,7 +15,7 @@ Sophie pings a location from Telegram; you tell her which of HER places are near
 Where are you? Tap 📎 → Location to share. {{request_location}}
 ```
 
-The marker renders a native share-location button on clients that support it; the 📎 instruction covers Telegram iOS, where bot keyboards are currently broken (known client bug, Jan 2026). Then end your turn; her share arrives as a new `[Location: …]` message that triggers you again.
+The marker renders a native share-location button in the real Telegram apps; the 📎 instruction covers Beeper (Sophie's usual client), which doesn't render bot reply keyboards at all. Then end your turn; her share arrives as a new `[Location: …]` message that triggers you again.
 2. Query the store:
 
 ```bash
