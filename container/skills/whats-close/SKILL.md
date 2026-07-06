@@ -9,13 +9,22 @@ Sophie pings a location from Telegram; you tell her which of HER places are near
 
 ## Steps
 
-1. Parse `lat, lon` from the location message. If she asked "what's close" WITHOUT sharing a location, reply with exactly this (never guess where she is):
+1. Get coordinates, in order of preference:
+   - **Shared location**: parse `lat, lon` from a `[Location: …]` message.
+   - **Text location**: if she names where she is ("near St-Laurent and Duluth", "at Café Olimpico", an address), geocode it:
+
+     ```bash
+     curl -s -A "nanoclaw-whats-close/1.0" "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=<url-encoded query, include the city>"
+     ```
+
+     Always include the city (from trip context/calendar if she didn't say). Echo the resolved spot back ("assuming you're near X") so a bad geocode is visible. If the query returns nothing, ask rather than guess.
+   - **Neither**: reply with exactly this and end your turn — her answer arrives as a new message that triggers you again:
 
 ```
-Where are you? Tap 📎 → Location to share. {{request_location}}
+Where are you? Tap the 📍 button (phone), or just tell me an address or cross-streets. {{request_location}}
 ```
 
-The marker renders a native share-location button in the real Telegram apps; the 📎 instruction covers Beeper (Sophie's usual client), which doesn't render bot reply keyboards at all. Then end your turn; her share arrives as a new `[Location: …]` message that triggers you again.
+The marker renders a native share-location button in the Telegram mobile apps only. Desktop clients (Beeper — Sophie's usual client — and Telegram Desktop) can't share location at all, which is what the text path is for. Never guess where she is.
 2. Query the store:
 
 ```bash
