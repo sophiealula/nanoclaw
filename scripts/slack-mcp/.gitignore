@@ -1,0 +1,5 @@
+# Slack session tokens + browser profile — never commit
+tokens.env
+.pw-profile/
+slack-mcp-server-darwin-arm64
+slack-mcp-server-*

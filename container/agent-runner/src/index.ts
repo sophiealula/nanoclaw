@@ -409,7 +409,11 @@ async function runQuery(
 
   // Load project .mcp.json for additional MCP servers (gsuite, etc.)
   const projectMcpPath = '/workspace/group/.mcp.json';
-  const projectMcpServers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }> = {};
+  const projectMcpServers: Record<
+    string,
+    | { command: string; args?: string[]; env?: Record<string, string> }
+    | { type: 'http' | 'sse'; url: string; headers?: Record<string, string> }
+  > = {};
   const projectMcpToolPatterns: string[] = [];
   if (fs.existsSync(projectMcpPath)) {
     try {
@@ -418,7 +422,8 @@ async function runQuery(
         for (const [name, config] of Object.entries(mcpJson.mcpServers)) {
           const serverConfig = config as typeof projectMcpServers[string];
           // SDK replaces process.env when `env` is set, so merge to preserve PATH/HOME/etc.
-          if (serverConfig.env) {
+          // (stdio servers only; http/sse servers carry no env.)
+          if ('env' in serverConfig && serverConfig.env) {
             serverConfig.env = { ...process.env as Record<string, string>, ...serverConfig.env };
           }
           projectMcpServers[name] = serverConfig;

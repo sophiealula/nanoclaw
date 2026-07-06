@@ -13,7 +13,10 @@ import {
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
+  HORTON_MCP_URL,
   IDLE_TIMEOUT,
+  PROJECT_ROOT,
+  SLACK_MCP_PORT,
   TIMEZONE,
 } from './config.js';
 import { readEnvFile } from './env.js';
@@ -255,6 +258,43 @@ function buildVolumeMounts(
       command: '/usr/local/bin/msgvault',
       args: ['mcp'],
     };
+  }
+  // Horton fleet MCP server (HTTP, over Tailscale/LAN). No credentials needed.
+  if (HORTON_MCP_URL) {
+    mcpConfig['Horton'] = {
+      type: 'http',
+      url: HORTON_MCP_URL,
+    };
+  }
+  // Slack MCP server (read-only, korotovsky/slack-mcp-server). Runs on the host
+  // bound to the container bridge gateway; Slack session tokens stay host-side.
+  // Only wired in if setup has run (server.env holds the local-gate bearer key).
+  if (SLACK_MCP_PORT) {
+    const slackEnvFile = path.join(
+      PROJECT_ROOT,
+      'scripts',
+      'slack-mcp',
+      'server.env',
+    );
+    const slackTokensFile = path.join(
+      PROJECT_ROOT,
+      'scripts',
+      'slack-mcp',
+      'tokens.env',
+    );
+    if (fs.existsSync(slackEnvFile) && fs.existsSync(slackTokensFile)) {
+      const m = fs
+        .readFileSync(slackEnvFile, 'utf8')
+        .match(/^SLACK_MCP_API_KEY=(.+)$/m);
+      const slackKey = m?.[1]?.trim();
+      if (slackKey) {
+        mcpConfig['Slack'] = {
+          type: 'http',
+          url: `http://${CONTAINER_HOST_GATEWAY}:${SLACK_MCP_PORT}/mcp`,
+          headers: { Authorization: `Bearer ${slackKey}` },
+        };
+      }
+    }
   }
   if (Object.keys(mcpConfig).length > 0) {
     fs.writeFileSync(

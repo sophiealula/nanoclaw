@@ -14,7 +14,10 @@ vi.mock('./config.js', () => ({
   CREDENTIAL_PROXY_PORT: 3001,
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
+  HORTON_MCP_URL: '',
   IDLE_TIMEOUT: 1800000, // 30min
+  PROJECT_ROOT: '/tmp/nanoclaw-test-root',
+  SLACK_MCP_PORT: '',
   TIMEZONE: 'America/Los_Angeles',
 }));
 
@@ -56,7 +59,10 @@ vi.mock('./container-runtime.js', () => ({
   CONTAINER_RUNTIME_BIN: 'container',
   CONTAINER_HOST_GATEWAY: 'host.docker.internal',
   hostGatewayArgs: () => [],
-  readonlyMountArgs: (h: string, c: string) => ['-v', `${h}:${c}:ro`],
+  bindMountArgs: (h: string, c: string, readonly: boolean) => [
+    '--mount',
+    `type=bind,source=${h},target=${c}${readonly ? ',readonly' : ''}`,
+  ],
   stopContainer: vi.fn(),
 }));
 

@@ -21,7 +21,7 @@ export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts
-const PROJECT_ROOT = process.cwd();
+export const PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || os.homedir();
 
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
@@ -43,6 +43,11 @@ export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
+// Horton fleet MCP server (HTTP). Reachable from the container at this URL
+// (verified: aibox01 resolves inside the Apple Container VM and :8890 is routable).
+// Set HORTON_MCP_URL='' to disable.
+export const HORTON_MCP_URL =
+  process.env.HORTON_MCP_URL ?? 'http://aibox01:8890/mcp';
 export const CONTAINER_TIMEOUT = parseInt(
   process.env.CONTAINER_TIMEOUT || '1800000',
   10,
@@ -55,6 +60,11 @@ export const CREDENTIAL_PROXY_PORT = parseInt(
   process.env.CREDENTIAL_PROXY_PORT || '3001',
   10,
 );
+// Slack MCP server (korotovsky/slack-mcp-server). Runs on the host, managed by
+// com.nanoclaw.slack-mcp launchd plist, bound to the container bridge gateway.
+// Auto-wired into each group's .mcp.json only if scripts/slack-mcp/server.env
+// and tokens.env exist (i.e. setup has been run). Set SLACK_MCP_PORT='' to disable.
+export const SLACK_MCP_PORT = process.env.SLACK_MCP_PORT ?? '13080';
 export const ONECLI_URL =
   process.env.ONECLI_URL || envConfig.ONECLI_URL || 'http://localhost:10254';
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
