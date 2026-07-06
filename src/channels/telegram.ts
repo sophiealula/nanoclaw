@@ -213,7 +213,20 @@ export class TelegramChannel implements Channel {
       const emoji = ctx.message.sticker?.emoji || '';
       storeNonText(ctx, `[Sticker ${emoji}]`);
     });
-    this.bot.on('message:location', (ctx) => storeNonText(ctx, '[Location]'));
+    this.bot.on('message:venue', (ctx) => {
+      const v = ctx.message.venue!;
+      storeNonText(
+        ctx,
+        `[Location: ${v.location.latitude}, ${v.location.longitude} — ${v.title}${v.address ? `, ${v.address}` : ''}]`,
+      );
+    });
+    this.bot.on('message:location', (ctx) => {
+      // Venue messages also carry `location`; grammY runs both handlers, so
+      // skip the bare-location placeholder when the venue one already stored it.
+      if (ctx.message.venue) return;
+      const l = ctx.message.location!;
+      storeNonText(ctx, `[Location: ${l.latitude}, ${l.longitude}]`);
+    });
     this.bot.on('message:contact', (ctx) => storeNonText(ctx, '[Contact]'));
 
     // Handle errors gracefully

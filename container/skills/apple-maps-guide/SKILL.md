@@ -22,6 +22,11 @@ node .claude/skills/apple-maps-guide/scripts/apple-guide-link.mjs '{
 ```
 
 3. Reply with the link. Keep the link on its own line so Telegram renders it tappable.
+4. Append every place that went into the guide (with its coords) to the shared place store, so the `whats-close` skill can answer "what's near me" later:
+
+```bash
+node .claude/skills/whats-close/scripts/places.mjs add '[{"name":"Spot","lat":45.51,"lon":-73.58,"city":"Montréal","note":"one-liner","source":"guide: Andy picks — Montréal"}]'
+```
 
 ## Rules
 

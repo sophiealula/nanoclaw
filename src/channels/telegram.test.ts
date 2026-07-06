@@ -671,17 +671,48 @@ describe('TelegramChannel', () => {
       );
     });
 
-    it('stores location with placeholder', async () => {
+    it('stores location with coordinates', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
 
-      const ctx = createMediaCtx({});
+      const ctx = createMediaCtx({
+        extra: { location: { latitude: 45.5155, longitude: -73.5877 } },
+      });
       await triggerMediaMessage('message:location', ctx);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:100200300',
-        expect.objectContaining({ content: '[Location]' }),
+        expect.objectContaining({ content: '[Location: 45.5155, -73.5877]' }),
+      );
+    });
+
+    it('stores venue with coordinates, title, and address', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createMediaCtx({
+        extra: {
+          venue: {
+            location: { latitude: 48.8612, longitude: 2.3618 },
+            title: 'Mesures',
+            address: '58 Rue de Saintonge',
+          },
+          location: { latitude: 48.8612, longitude: 2.3618 },
+        },
+      });
+      await triggerMediaMessage('message:venue', ctx);
+      // Telegram venue messages also match message:location — the bare-location
+      // handler must not double-store them.
+      await triggerMediaMessage('message:location', ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledTimes(1);
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: '[Location: 48.8612, 2.3618 — Mesures, 58 Rue de Saintonge]',
+        }),
       );
     });
 
