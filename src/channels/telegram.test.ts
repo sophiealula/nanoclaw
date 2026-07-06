@@ -759,6 +759,31 @@ describe('TelegramChannel', () => {
       );
     });
 
+    it('converts {{request_location}} marker into a share-location keyboard', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendMessage(
+        'tg:100200300',
+        'Where are you? {{request_location}}',
+      );
+
+      expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
+        '100200300',
+        'Where are you?',
+        expect.objectContaining({
+          reply_markup: {
+            keyboard: [
+              [{ text: '📍 Share my location', request_location: true }],
+            ],
+            one_time_keyboard: true,
+            resize_keyboard: true,
+          },
+        }),
+      );
+    });
+
     it('strips tg: prefix from JID', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);

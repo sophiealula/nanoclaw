@@ -264,9 +264,24 @@ export class TelegramChannel implements Channel {
 
     try {
       const numericId = jid.replace(/^tg:/, '');
-      const options = threadId
+      const options: Record<string, unknown> = threadId
         ? { message_thread_id: parseInt(threadId, 10) }
         : {};
+
+      // Agent-requested location prompt: the {{request_location}} marker becomes
+      // a reply-keyboard button that pops Telegram's native share-location UI.
+      // Only works in private chats (Telegram limitation).
+      if (text.includes('{{request_location}}')) {
+        text = text.replace(/\s*\{\{request_location\}\}\s*/g, ' ').trim();
+        if (!text) text = 'Share your location and I’ll see what’s close 👇';
+        options.reply_markup = {
+          keyboard: [
+            [{ text: '📍 Share my location', request_location: true }],
+          ],
+          one_time_keyboard: true,
+          resize_keyboard: true,
+        };
+      }
 
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
@@ -274,11 +289,14 @@ export class TelegramChannel implements Channel {
         await sendTelegramMessage(this.bot.api, numericId, text, options);
       } else {
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
+          // Attach the keyboard (if any) only to the final chunk so it lands last
+          const isLast = i + MAX_LENGTH >= text.length;
+          const { reply_markup, ...base } = options;
           await sendTelegramMessage(
             this.bot.api,
             numericId,
             text.slice(i, i + MAX_LENGTH),
-            options,
+            isLast ? options : base,
           );
         }
       }

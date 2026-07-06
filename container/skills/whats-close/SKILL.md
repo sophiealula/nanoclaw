@@ -9,7 +9,13 @@ Sophie pings a location from Telegram; you tell her which of HER places are near
 
 ## Steps
 
-1. Parse `lat, lon` from the location message. If she asked "what's close" WITHOUT sharing a location, ask her to share one (Telegram: attach → Location) — don't guess where she is.
+1. Parse `lat, lon` from the location message. If she asked "what's close" WITHOUT sharing a location, reply with exactly this (the marker becomes a native share-location button in Telegram — never guess where she is):
+
+```
+Where are you? {{request_location}}
+```
+
+Then end your turn; her tap arrives as a new `[Location: …]` message that triggers you again.
 2. Query the store:
 
 ```bash
