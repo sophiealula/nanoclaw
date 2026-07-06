@@ -21,6 +21,19 @@ groups/global/*
 # Secrets
 *.keys.json
 .env
+scripts/slack-mcp/*.env
+!scripts/slack-mcp/default.env.dist
+
+# Prebuilt binaries (rebuild: amazon-pp-cli from cli-printing-press catalog;
+# slack-mcp-server from github.com/korotovsky/slack-mcp-server releases)
+container/amazon-pp-cli
+scripts/slack-mcp/slack-mcp-server-darwin-arm64
+
+# Local scratch / tool output / stray artifacts
+scratch/
+.playwright-mcp/
+nanoclaw.db
+cli-printing-press/
 
 # Temp files
 .tmp-*
