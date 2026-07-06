@@ -270,7 +270,7 @@ The whole point is to verify the auth + checkout navigation works without chargi
    • Total: $<Z>
    • Delivery window: <slot text>
 
-   Screenshots in groups/telegram_main/order-traces/dryrun-<ts>/
+   Screenshots in groups/<group>/order-traces/dryrun-<ts>/
    If this looks right, say `place my <retailer> order` to do it for real.
    ```
 10. Do NOT write `.order-pending.json` — dry-run is one-shot, no follow-up confirm needed.
@@ -289,7 +289,7 @@ The whole point is to verify the auth + checkout navigation works without chargi
 
 If a command returns an auth error (401, "session expired", "cookies invalid"), the host's Instacart session cookie has expired. Do NOT try to re-auth from inside the container. Instead:
 
-1. Reply to Soph: "Instacart session expired — please re-auth on your laptop before I can continue."
+1. Reply to Soph: "Instacart session expired — please re-auth on your laptop before I can continue." (Host-side fix, for reference: quit Chrome then `instacart-pp-cli auth login`, or `instacart-pp-cli auth paste` with a Cookie header from DevTools; verify with `instacart-pp-cli auth status`. The config dir is a live mount, so no container rebuild is needed.)
 2. Stop the order flow; do not proceed with partial information.
 
 ## Binary missing
