@@ -9,13 +9,13 @@ Sophie pings a location from Telegram; you tell her which of HER places are near
 
 ## Steps
 
-1. Parse `lat, lon` from the location message. If she asked "what's close" WITHOUT sharing a location, reply with exactly this (the marker becomes a native share-location button in Telegram — never guess where she is):
+1. Parse `lat, lon` from the location message. If she asked "what's close" WITHOUT sharing a location, reply with exactly this (never guess where she is):
 
 ```
-Where are you? {{request_location}}
+Where are you? Tap 📎 → Location to share. {{request_location}}
 ```
 
-Then end your turn; her tap arrives as a new `[Location: …]` message that triggers you again.
+The marker renders a native share-location button on clients that support it; the 📎 instruction covers Telegram iOS, where bot keyboards are currently broken (known client bug, Jan 2026). Then end your turn; her share arrives as a new `[Location: …]` message that triggers you again.
 2. Query the store:
 
 ```bash

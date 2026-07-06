@@ -273,7 +273,9 @@ export class TelegramChannel implements Channel {
       // Only works in private chats (Telegram limitation).
       if (text.includes('{{request_location}}')) {
         text = text.replace(/\s*\{\{request_location\}\}\s*/g, ' ').trim();
-        if (!text) text = 'Share your location and I’ll see what’s close 👇';
+        if (!text)
+          text =
+            'Share your location (tap 📎 → Location) and I’ll see what’s close';
         options.reply_markup = {
           keyboard: [
             [{ text: '📍 Share my location', request_location: true }],
