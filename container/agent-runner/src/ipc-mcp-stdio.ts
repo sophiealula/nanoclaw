@@ -77,6 +77,29 @@ server.tool(
 );
 
 server.tool(
+  'send_image',
+  'Send a photo to the user or group. Use this to deliver an image file (e.g. a generated or downloaded picture) to the chat. The file must live under /workspace/group/.',
+  {
+    path: z.string().describe('Absolute path to an image file under /workspace/group/'),
+    caption: z.string().optional().describe('Optional caption shown with the photo'),
+  },
+  async (args) => {
+    const data: Record<string, string | undefined> = {
+      type: 'image',
+      chatJid,
+      path: args.path,
+      caption: args.caption || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: 'Image sent.' }] };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 
