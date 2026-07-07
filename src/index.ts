@@ -52,7 +52,12 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound } from './router.js';
+import {
+  findChannel,
+  formatMessages,
+  formatOutbound,
+  routeOutboundImage,
+} from './router.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -807,6 +812,8 @@ async function main(): Promise<void> {
       // (queue.sendMessage callback above) cancels the swap.
       return channel.sendMessage(jid, text);
     },
+    sendImage: (jid, filePath, caption) =>
+      routeOutboundImage(channels, jid, filePath, caption),
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroups: async (force: boolean) => {

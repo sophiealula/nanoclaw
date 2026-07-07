@@ -9,9 +9,10 @@ import {
   escapeXml,
   formatMessages,
   formatOutbound,
+  routeOutboundImage,
   stripInternalTags,
 } from './router.js';
-import { NewMessage } from './types.js';
+import { Channel, NewMessage } from './types.js';
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
   return {
@@ -232,6 +233,68 @@ describe('formatOutbound', () => {
     expect(
       formatOutbound('<internal>thinking</internal>The answer is 42'),
     ).toBe('The answer is 42');
+  });
+});
+
+// --- routeOutboundImage ---
+
+describe('routeOutboundImage', () => {
+  function makeChannel(overrides: Partial<Channel> = {}): Channel {
+    return {
+      name: 'stub',
+      connect: async () => {},
+      sendMessage: async () => {},
+      isConnected: () => true,
+      ownsJid: () => true,
+      disconnect: async () => {},
+      ...overrides,
+    };
+  }
+
+  it('sends via channel.sendImage when the channel supports it', async () => {
+    const images: [string, string, string | undefined][] = [];
+    const channel = makeChannel({
+      sendImage: async (jid, filePath, caption) => {
+        images.push([jid, filePath, caption]);
+      },
+    });
+
+    await routeOutboundImage([channel], 'tg:123', '/tmp/pic.jpg', 'a caption');
+
+    expect(images).toEqual([['tg:123', '/tmp/pic.jpg', 'a caption']]);
+  });
+
+  it('falls back to sendMessage caption when the channel lacks sendImage', async () => {
+    const texts: [string, string][] = [];
+    const channel = makeChannel({
+      sendMessage: async (jid, text) => {
+        texts.push([jid, text]);
+      },
+    });
+
+    await routeOutboundImage([channel], 'group@g.us', '/tmp/pic.jpg', 'look!');
+
+    expect(texts).toEqual([['group@g.us', 'look!']]);
+  });
+
+  it('falls back to "[image]" when the channel lacks sendImage and no caption', async () => {
+    const texts: [string, string][] = [];
+    const channel = makeChannel({
+      sendMessage: async (jid, text) => {
+        texts.push([jid, text]);
+      },
+    });
+
+    await routeOutboundImage([channel], 'group@g.us', '/tmp/pic.jpg');
+
+    expect(texts).toEqual([['group@g.us', '[image]']]);
+  });
+
+  it('throws when no connected channel owns the JID', () => {
+    const channel = makeChannel({ ownsJid: () => false });
+    expect(() =>
+      routeOutboundImage([channel], 'nobody@g.us', '/tmp/pic.jpg'),
+    ).toThrow('No channel for JID');
   });
 });
 
