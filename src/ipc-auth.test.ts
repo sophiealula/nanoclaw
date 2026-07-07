@@ -1,4 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import {
   _initTestDatabase,
@@ -8,7 +12,8 @@ import {
   getTaskById,
   setRegisteredGroup,
 } from './db.js';
-import { processTaskIpc, IpcDeps } from './ipc.js';
+import { processImageIpc, processTaskIpc, IpcDeps } from './ipc.js';
+import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
 // Set up registered groups used across tests
@@ -53,6 +58,7 @@ beforeEach(() => {
 
   deps = {
     sendMessage: async () => {},
+    sendImage: async () => {},
     registeredGroups: () => groups,
     registerGroup: (jid, group) => {
       groups[jid] = group;
@@ -433,6 +439,220 @@ describe('IPC message authorization', () => {
     expect(
       isMessageAuthorized('whatsapp_main', true, 'unknown@g.us', groups),
     ).toBe(true);
+  });
+});
+
+// --- IPC image processing ---
+
+describe('IPC image processing', () => {
+  let groupsDir: string;
+  let sent: { jid: string; filePath: string; caption?: string }[];
+
+  beforeEach(() => {
+    groupsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipc-image-test-'));
+    sent = [];
+    deps.sendImage = async (jid, filePath, caption) => {
+      sent.push({ jid, filePath, caption });
+    };
+  });
+
+  afterEach(() => {
+    fs.rmSync(groupsDir, { recursive: true, force: true });
+  });
+
+  function writeGroupFile(groupFolder: string, rel: string): string {
+    const hostPath = path.join(groupsDir, groupFolder, rel);
+    fs.mkdirSync(path.dirname(hostPath), { recursive: true });
+    fs.writeFileSync(hostPath, 'jpg-bytes');
+    // processImageIpc sends the symlink-resolved path, so expectations must
+    // compare against it too (macOS tmpdir is itself a /var → /private/var link)
+    return fs.realpathSync(hostPath);
+  }
+
+  it('routes an image to sendImage with the translated host path', async () => {
+    const hostPath = writeGroupFile('other-group', 'media/pic.jpg');
+
+    await processImageIpc(
+      { chatJid: 'other@g.us', path: '/workspace/group/media/pic.jpg' },
+      'other-group',
+      false,
+      deps,
+      groupsDir,
+    );
+
+    expect(sent).toEqual([
+      { jid: 'other@g.us', filePath: hostPath, caption: undefined },
+    ]);
+  });
+
+  it('passes the caption through', async () => {
+    writeGroupFile('other-group', 'pic.jpg');
+
+    await processImageIpc(
+      {
+        chatJid: 'other@g.us',
+        path: '/workspace/group/pic.jpg',
+        caption: 'guess where!',
+      },
+      'other-group',
+      false,
+      deps,
+      groupsDir,
+    );
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].caption).toBe('guess where!');
+  });
+
+  it('main group can send an image to any chat', async () => {
+    const hostPath = writeGroupFile('whatsapp_main', 'pic.jpg');
+
+    await processImageIpc(
+      { chatJid: 'third@g.us', path: '/workspace/group/pic.jpg' },
+      'whatsapp_main',
+      true,
+      deps,
+      groupsDir,
+    );
+
+    expect(sent).toEqual([
+      { jid: 'third@g.us', filePath: hostPath, caption: undefined },
+    ]);
+  });
+
+  it('blocks unauthorized cross-group image sends', async () => {
+    writeGroupFile('other-group', 'pic.jpg');
+
+    await processImageIpc(
+      { chatJid: 'main@g.us', path: '/workspace/group/pic.jpg' },
+      'other-group',
+      false,
+      deps,
+      groupsDir,
+    );
+
+    expect(sent).toHaveLength(0);
+  });
+
+  it('rejects relative traversal outside /workspace/group', async () => {
+    writeGroupFile('other-group', 'pic.jpg');
+
+    await processImageIpc(
+      {
+        chatJid: 'other@g.us',
+        path: '/workspace/group/../../etc/passwd',
+      },
+      'other-group',
+      false,
+      deps,
+      groupsDir,
+    );
+
+    expect(sent).toHaveLength(0);
+  });
+
+  it('rejects absolute host paths', async () => {
+    const hostPath = writeGroupFile('other-group', 'pic.jpg');
+
+    await processImageIpc(
+      { chatJid: 'other@g.us', path: hostPath },
+      'other-group',
+      false,
+      deps,
+      groupsDir,
+    );
+
+    expect(sent).toHaveLength(0);
+  });
+
+  it('rejects missing files', async () => {
+    await processImageIpc(
+      { chatJid: 'other@g.us', path: '/workspace/group/nope.jpg' },
+      'other-group',
+      false,
+      deps,
+      groupsDir,
+    );
+
+    expect(sent).toHaveLength(0);
+  });
+
+  it('rejects symlinks escaping the group folder', async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipc-outside-'));
+    try {
+      fs.writeFileSync(path.join(outsideDir, 'secret.txt'), 'host-secret');
+      fs.mkdirSync(path.join(groupsDir, 'other-group'), { recursive: true });
+      fs.symlinkSync(outsideDir, path.join(groupsDir, 'other-group', 'evil'));
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      await processImageIpc(
+        { chatJid: 'other@g.us', path: '/workspace/group/evil/secret.txt' },
+        'other-group',
+        false,
+        deps,
+        groupsDir,
+      );
+
+      expect(sent).toHaveLength(0);
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    } finally {
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('allows symlinks that stay inside the group folder', async () => {
+    const realPath = writeGroupFile('other-group', 'real.jpg');
+    const linkPath = path.join(groupsDir, 'other-group', 'link.jpg');
+    fs.symlinkSync(realPath, linkPath);
+
+    await processImageIpc(
+      { chatJid: 'other@g.us', path: '/workspace/group/link.jpg' },
+      'other-group',
+      false,
+      deps,
+      groupsDir,
+    );
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].jid).toBe('other@g.us');
+    // The resolved target must be sent, not the symlink — a container could
+    // repoint the link between validation and the async file read.
+    expect(sent[0].filePath).toBe(realPath);
+  });
+
+  it('rejects dangling symlinks', async () => {
+    fs.mkdirSync(path.join(groupsDir, 'other-group'), { recursive: true });
+    fs.symlinkSync(
+      path.join(groupsDir, 'other-group', 'gone.jpg'),
+      path.join(groupsDir, 'other-group', 'dangling.jpg'),
+    );
+
+    await processImageIpc(
+      { chatJid: 'other@g.us', path: '/workspace/group/dangling.jpg' },
+      'other-group',
+      false,
+      deps,
+      groupsDir,
+    );
+
+    expect(sent).toHaveLength(0);
+  });
+
+  it('accepts an in-bounds file whose name starts with ..', async () => {
+    const hostPath = writeGroupFile('other-group', '..config.jpg');
+
+    await processImageIpc(
+      { chatJid: 'other@g.us', path: '/workspace/group/..config.jpg' },
+      'other-group',
+      false,
+      deps,
+      groupsDir,
+    );
+
+    expect(sent).toEqual([
+      { jid: 'other@g.us', filePath: hostPath, caption: undefined },
+    ]);
   });
 });
 

@@ -47,6 +47,20 @@ export function routeOutbound(
   return channel.sendMessage(jid, text);
 }
 
+export function routeOutboundImage(
+  channels: Channel[],
+  jid: string,
+  filePath: string,
+  caption?: string,
+): Promise<void> {
+  const channel = channels.find((c) => c.ownsJid(jid) && c.isConnected());
+  if (!channel) throw new Error(`No channel for JID: ${jid}`);
+  if (!channel.sendImage) {
+    return channel.sendMessage(jid, caption ?? '[image]');
+  }
+  return channel.sendImage(jid, filePath, caption);
+}
+
 export function findChannel(
   channels: Channel[],
   jid: string,

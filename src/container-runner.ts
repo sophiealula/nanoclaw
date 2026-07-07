@@ -525,6 +525,7 @@ function buildContainerArgs(
     'TELEGRAM_BOT_TOKEN',
     'GEMINI_API_KEY',
     'GEMINI_MODEL',
+    'GOOGLE_MAPS_API_KEY',
   ]);
   for (const [key, value] of Object.entries(serviceEnv)) {
     args.push('-e', `${key}=${value}`);

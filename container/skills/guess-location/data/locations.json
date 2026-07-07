@@ -1,0 +1,702 @@
+[
+  {
+    "id": "shibuya-crossing", "name": "Shibuya Crossing",
+    "aliases": ["shibuya", "tokyo", "shibuya scramble"],
+    "city": "Tokyo", "country": "Japan", "continent": "Asia",
+    "lat": 35.6595, "lng": 139.7005, "heading": 20, "fov": 100,
+    "hints": ["This continent wakes up first.", "Country: Japan.", "The name starts with 'S'.", "The world's busiest pedestrian scramble, right outside Hachiko's station."]
+  },
+  {
+    "id": "fushimi-inari", "name": "Fushimi Inari Shrine",
+    "aliases": ["kyoto", "fushimi inari taisha", "fushimi inari", "torii gates"],
+    "city": "Kyoto", "country": "Japan", "continent": "Asia",
+    "lat": 34.9677, "lng": 135.7726, "heading": 170, "fov": 90,
+    "hints": ["This continent wakes up first.", "Country: Japan.", "The name starts with 'F'.", "Thousands of vermilion torii gates tunneling up a mountainside."]
+  },
+  {
+    "id": "dotonbori", "name": "Dotonbori",
+    "aliases": ["osaka", "dotombori", "glico sign"],
+    "city": "Osaka", "country": "Japan", "continent": "Asia",
+    "lat": 34.6687, "lng": 135.5013, "heading": 250, "fov": 90,
+    "hints": ["This continent wakes up first.", "Country: Japan.", "The name starts with 'D'.", "A neon canal strip watched over by a giant running-man billboard."]
+  },
+  {
+    "id": "gwanghwamun-square", "name": "Gwanghwamun Square",
+    "aliases": ["seoul", "gwanghwamun"],
+    "city": "Seoul", "country": "South Korea", "continent": "Asia",
+    "lat": 37.572, "lng": 126.9769, "heading": 0, "fov": 90,
+    "hints": ["This continent wakes up first.", "Country: South Korea.", "The name starts with 'G'.", "A grand boulevard guarded by statues of King Sejong and Admiral Yi."]
+  },
+  {
+    "id": "victoria-harbour", "name": "Victoria Harbour",
+    "aliases": ["hong kong", "tsim sha tsui", "kowloon"],
+    "city": "Hong Kong", "country": "Hong Kong", "continent": "Asia",
+    "lat": 22.2934, "lng": 114.17, "heading": 200, "fov": 100,
+    "hints": ["This continent wakes up first.", "Country: Hong Kong.", "The name starts with 'V'.", "A wall of skyscrapers across the water, best seen from the Star Ferry."]
+  },
+  {
+    "id": "marina-bay", "name": "Marina Bay",
+    "aliases": ["singapore", "merlion", "marina bay sands"],
+    "city": "Singapore", "country": "Singapore", "continent": "Asia",
+    "lat": 1.2868, "lng": 103.8545, "heading": 115, "fov": 100,
+    "hints": ["This continent wakes up first.", "Country: Singapore.", "The name starts with 'M'.", "Three towers balancing a ship-shaped skypark, across from a water-spitting lion."]
+  },
+  {
+    "id": "petronas-towers", "name": "Petronas Towers",
+    "aliases": ["kuala lumpur", "kl", "klcc", "petronas twin towers"],
+    "city": "Kuala Lumpur", "country": "Malaysia", "continent": "Asia",
+    "lat": 3.1573, "lng": 101.7116, "heading": 10, "fov": 80,
+    "hints": ["This continent wakes up first.", "Country: Malaysia.", "The name starts with 'P'.", "Twin steel towers joined by a skybridge — once the tallest on Earth."]
+  },
+  {
+    "id": "grand-palace-bangkok", "name": "Grand Palace",
+    "aliases": ["bangkok", "wat phra kaew"],
+    "city": "Bangkok", "country": "Thailand", "continent": "Asia",
+    "lat": 13.7516, "lng": 100.4927, "heading": 90, "fov": 90,
+    "hints": ["This continent wakes up first.", "Country: Thailand.", "The name starts with 'G'.", "Golden spires and the Emerald Buddha in a very royal riverside compound."]
+  },
+  {
+    "id": "taj-mahal", "name": "Taj Mahal",
+    "aliases": ["agra"],
+    "city": "Agra", "country": "India", "continent": "Asia",
+    "lat": 27.1737, "lng": 78.0421, "heading": 0, "fov": 90,
+    "hints": ["This continent wakes up first.", "Country: India.", "The name starts with 'T'.", "A white marble mausoleum an emperor built for his late wife."]
+  },
+  {
+    "id": "hawa-mahal", "name": "Hawa Mahal",
+    "aliases": ["jaipur", "palace of winds", "pink city"],
+    "city": "Jaipur", "country": "India", "continent": "Asia",
+    "lat": 26.9239, "lng": 75.8267, "heading": 80, "fov": 90,
+    "hints": ["This continent wakes up first.", "Country: India.", "The name starts with 'H'.", "A pink honeycomb facade with 953 tiny windows."]
+  },
+  {
+    "id": "india-gate", "name": "India Gate",
+    "aliases": ["new delhi", "delhi"],
+    "city": "New Delhi", "country": "India", "continent": "Asia",
+    "lat": 28.6129, "lng": 77.2295, "heading": 0, "fov": 90,
+    "hints": ["This continent wakes up first.", "Country: India.", "The name starts with 'I'.", "A sandstone war-memorial arch at the end of a ceremonial boulevard."]
+  },
+  {
+    "id": "burj-khalifa", "name": "Burj Khalifa",
+    "aliases": ["dubai", "burj"],
+    "city": "Dubai", "country": "United Arab Emirates", "continent": "Asia",
+    "lat": 25.1988, "lng": 55.2745, "heading": 190, "fov": 80,
+    "hints": ["This continent wakes up first.", "Country: United Arab Emirates.", "The name starts with 'B'.", "You are looking at the tallest building on the planet."]
+  },
+  {
+    "id": "sheikh-zayed-grand-mosque", "name": "Sheikh Zayed Grand Mosque",
+    "aliases": ["abu dhabi", "grand mosque"],
+    "city": "Abu Dhabi", "country": "United Arab Emirates", "continent": "Asia",
+    "lat": 24.4128, "lng": 54.475, "heading": 270, "fov": 90,
+    "hints": ["This continent wakes up first.", "Country: United Arab Emirates.", "The name starts with 'S'.", "Eighty-two white marble domes and the world's biggest hand-knotted carpet."]
+  },
+  {
+    "id": "petra", "name": "Petra",
+    "aliases": ["wadi musa", "al khazneh", "treasury"],
+    "city": "Wadi Musa", "country": "Jordan", "continent": "Asia",
+    "lat": 30.3225, "lng": 35.4517, "heading": 200, "fov": 90,
+    "hints": ["This continent wakes up first.", "Country: Jordan.", "The name starts with 'P'.", "A rose-red temple facade carved straight into a desert canyon wall."]
+  },
+  {
+    "id": "western-wall", "name": "Western Wall",
+    "aliases": ["jerusalem", "wailing wall", "kotel"],
+    "city": "Jerusalem", "country": "Israel", "continent": "Asia",
+    "lat": 31.7767, "lng": 35.2345, "heading": 90, "fov": 90,
+    "hints": ["This continent wakes up first.", "Country: Israel.", "The name starts with 'W'.", "The holiest place of prayer in Judaism, its cracks tucked with folded notes."]
+  },
+  {
+    "id": "hoi-an-old-town", "name": "Hoi An Ancient Town",
+    "aliases": ["hoi an", "hoian", "japanese covered bridge"],
+    "city": "Hoi An", "country": "Vietnam", "continent": "Asia",
+    "lat": 15.877, "lng": 108.3262, "heading": 270, "fov": 90,
+    "hints": ["This continent wakes up first.", "Country: Vietnam.", "The name starts with 'H'.", "Yellow-walled shophouses and silk lanterns beside a covered Japanese bridge."]
+  },
+  {
+    "id": "taipei-101", "name": "Taipei 101",
+    "aliases": ["taipei"],
+    "city": "Taipei", "country": "Taiwan", "continent": "Asia",
+    "lat": 25.0336, "lng": 121.5646, "heading": 140, "fov": 80,
+    "hints": ["This continent wakes up first.", "Country: Taiwan.", "The name starts with 'T'.", "A bamboo-shaped supertall that rings in the new year with fireworks."]
+  },
+  {
+    "id": "angkor-wat", "name": "Angkor Wat",
+    "aliases": ["siem reap", "angkor"],
+    "city": "Siem Reap", "country": "Cambodia", "continent": "Asia",
+    "lat": 13.4125, "lng": 103.867, "heading": 90, "fov": 90,
+    "hints": ["This continent wakes up first.", "Country: Cambodia.", "The name starts with 'A'.", "The largest religious monument on Earth — it's on its country's flag."]
+  },
+  {
+    "id": "souq-waqif", "name": "Souq Waqif",
+    "aliases": ["doha"],
+    "city": "Doha", "country": "Qatar", "continent": "Asia",
+    "lat": 25.2876, "lng": 51.531, "heading": 90, "fov": 90,
+    "hints": ["This continent wakes up first.", "Country: Qatar.", "The name starts with 'S'.", "A mudbrick spice market where they still trade falcons."]
+  },
+  {
+    "id": "hagia-sophia", "name": "Hagia Sophia",
+    "aliases": ["istanbul", "ayasofya", "aya sofya"],
+    "city": "Istanbul", "country": "Turkey", "continent": "Europe",
+    "lat": 41.0068, "lng": 28.977, "heading": 60, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Turkey.", "The name starts with 'H'.", "Fifteen centuries of cathedral, mosque, museum, then mosque again."]
+  },
+  {
+    "id": "eiffel-tower", "name": "Eiffel Tower",
+    "aliases": ["paris", "tour eiffel"],
+    "city": "Paris", "country": "France", "continent": "Europe",
+    "lat": 48.862, "lng": 2.2875, "heading": 135, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: France.", "The name starts with 'E'.", "A wrought-iron lady built for the 1889 World's Fair."]
+  },
+  {
+    "id": "big-ben", "name": "Big Ben",
+    "aliases": ["london", "elizabeth tower", "westminster", "houses of parliament"],
+    "city": "London", "country": "United Kingdom", "continent": "Europe",
+    "lat": 51.5008, "lng": -0.1224, "heading": 270, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: United Kingdom.", "The name starts with 'B'.", "The most famous clock tower on Earth, bonging beside a river."]
+  },
+  {
+    "id": "colosseum", "name": "Colosseum",
+    "aliases": ["rome", "colosseo", "coliseum"],
+    "city": "Rome", "country": "Italy", "continent": "Europe",
+    "lat": 41.8892, "lng": 12.4909, "heading": 45, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Italy.", "The name starts with 'C'.", "Gladiators fought in this amphitheatre two thousand years ago."]
+  },
+  {
+    "id": "sagrada-familia", "name": "Sagrada Família",
+    "aliases": ["barcelona", "la sagrada familia"],
+    "city": "Barcelona", "country": "Spain", "continent": "Europe",
+    "lat": 41.4041, "lng": 2.173, "heading": 120, "fov": 80,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Spain.", "The name starts with 'S'.", "Gaudí's melting basilica, under construction since 1882."]
+  },
+  {
+    "id": "brandenburg-gate", "name": "Brandenburg Gate",
+    "aliases": ["berlin", "brandenburger tor", "pariser platz"],
+    "city": "Berlin", "country": "Germany", "continent": "Europe",
+    "lat": 52.5161, "lng": 13.379, "heading": 260, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Germany.", "The name starts with 'B'.", "A neoclassical gate topped with a four-horse chariot, once stuck behind a wall."]
+  },
+  {
+    "id": "charles-bridge", "name": "Charles Bridge",
+    "aliases": ["prague", "karluv most"],
+    "city": "Prague", "country": "Czech Republic", "continent": "Europe",
+    "lat": 50.0865, "lng": 14.4114, "heading": 250, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Czech Republic.", "The name starts with 'C'.", "A statue-lined medieval bridge over the Vltava, below a castle."]
+  },
+  {
+    "id": "red-square", "name": "Red Square",
+    "aliases": ["moscow", "saint basils", "st basils", "kremlin"],
+    "city": "Moscow", "country": "Russia", "continent": "Europe",
+    "lat": 55.7539, "lng": 37.6208, "heading": 140, "fov": 100,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Russia.", "The name starts with 'R'.", "Onion domes swirled like candy beside a very famous fortress."]
+  },
+  {
+    "id": "dam-square", "name": "Dam Square",
+    "aliases": ["amsterdam", "the dam"],
+    "city": "Amsterdam", "country": "Netherlands", "continent": "Europe",
+    "lat": 52.3731, "lng": 4.8932, "heading": 270, "fov": 100,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Netherlands.", "The name starts with 'D'.", "The square this canal-and-bicycle capital is literally named after."]
+  },
+  {
+    "id": "grand-place", "name": "Grote Markt",
+    "aliases": ["brussels"],
+    "city": "Brussels", "country": "Belgium", "continent": "Europe",
+    "lat": 50.8467, "lng": 4.3525, "heading": 45, "fov": 100,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Belgium.", "The name starts with 'G'.", "A gilded guildhall square famous for its flower carpet and nearby waffles."]
+  },
+  {
+    "id": "st-marks-square", "name": "St Mark's Square",
+    "aliases": ["venice", "piazza san marco", "san marco"],
+    "city": "Venice", "country": "Italy", "continent": "Europe",
+    "lat": 45.434, "lng": 12.339, "heading": 90, "fov": 100,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Italy.", "The name starts with 'S'.", "Pigeons, a campanile, and gondolas parked out back."]
+  },
+  {
+    "id": "milan-cathedral", "name": "Milan Cathedral",
+    "aliases": ["milan", "duomo", "duomo di milano", "piazza del duomo"],
+    "city": "Milan", "country": "Italy", "continent": "Europe",
+    "lat": 45.4636, "lng": 9.1885, "heading": 70, "fov": 100,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Italy.", "The name starts with 'M'.", "A spiky white Gothic cathedral that took six centuries to finish, in the fashion capital."]
+  },
+  {
+    "id": "leaning-tower-of-pisa", "name": "Leaning Tower of Pisa",
+    "aliases": ["pisa", "torre di pisa", "leaning tower"],
+    "city": "Pisa", "country": "Italy", "continent": "Europe",
+    "lat": 43.7229, "lng": 10.3944, "heading": 75, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Italy.", "The name starts with 'L'.", "A bell tower famous for being four degrees off vertical."]
+  },
+  {
+    "id": "acropolis", "name": "Acropolis",
+    "aliases": ["athens", "parthenon"],
+    "city": "Athens", "country": "Greece", "continent": "Europe",
+    "lat": 37.9715, "lng": 23.7262, "heading": 45, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Greece.", "The name starts with 'A'.", "A marble temple to a grey-eyed goddess, on a hill above her city."]
+  },
+  {
+    "id": "plaza-mayor-madrid", "name": "Plaza Mayor",
+    "aliases": ["madrid"],
+    "city": "Madrid", "country": "Spain", "continent": "Europe",
+    "lat": 40.4155, "lng": -3.7074, "heading": 0, "fov": 100,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Spain.", "The name starts with 'P'.", "The arcaded main square of Spain's capital."]
+  },
+  {
+    "id": "alhambra", "name": "Alhambra",
+    "aliases": ["granada", "mirador de san nicolas"],
+    "city": "Granada", "country": "Spain", "continent": "Europe",
+    "lat": 37.1812, "lng": -3.5927, "heading": 155, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Spain.", "The name starts with 'A'.", "A Moorish palace-fortress glowing red beneath the Sierra Nevada."]
+  },
+  {
+    "id": "edinburgh-castle", "name": "Edinburgh Castle",
+    "aliases": ["edinburgh", "royal mile", "castle rock"],
+    "city": "Edinburgh", "country": "United Kingdom", "continent": "Europe",
+    "lat": 55.9486, "lng": -3.197, "heading": 260, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: United Kingdom — Scotland, to be precise.", "The name starts with 'E'.", "A castle on a volcanic crag at the top of the Royal Mile."]
+  },
+  {
+    "id": "temple-bar", "name": "Temple Bar",
+    "aliases": ["dublin"],
+    "city": "Dublin", "country": "Ireland", "continent": "Europe",
+    "lat": 53.3454, "lng": -6.2637, "heading": 90, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Ireland.", "The name starts with 'T'.", "A bright-red pub in a cobbled quarter famous for pints of the black stuff."]
+  },
+  {
+    "id": "neuschwanstein", "name": "Neuschwanstein Castle",
+    "aliases": ["neuschwanstein", "schwangau", "fussen"],
+    "city": "Schwangau", "country": "Germany", "continent": "Europe",
+    "lat": 47.557, "lng": 10.75, "heading": 20, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Germany.", "The name starts with 'N'.", "The Bavarian fairy-tale castle that inspired Disney's."]
+  },
+  {
+    "id": "krakow-main-square", "name": "Main Market Square",
+    "aliases": ["krakow", "rynek glowny", "cloth hall"],
+    "city": "Kraków", "country": "Poland", "continent": "Europe",
+    "lat": 50.0617, "lng": 19.9373, "heading": 45, "fov": 100,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Poland.", "The name starts with 'M'.", "Medieval Europe's largest market square, with a trumpeter on the hour."]
+  },
+  {
+    "id": "stephansplatz", "name": "St Stephen's Cathedral",
+    "aliases": ["vienna", "stephansdom", "stephansplatz"],
+    "city": "Vienna", "country": "Austria", "continent": "Europe",
+    "lat": 48.2085, "lng": 16.3725, "heading": 90, "fov": 100,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Austria.", "The name starts with 'S'.", "A zigzag-roofed cathedral in the city of waltzes and schnitzel."]
+  },
+  {
+    "id": "hallstatt", "name": "Hallstatt",
+    "aliases": ["lake hallstatt", "salzkammergut"],
+    "city": "Hallstatt", "country": "Austria", "continent": "Europe",
+    "lat": 47.5645, "lng": 13.647, "heading": 170, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Austria.", "The name starts with 'H'.", "A lakeside salt-mining village so pretty that China built a copy."]
+  },
+  {
+    "id": "bryggen", "name": "Bryggen",
+    "aliases": ["bergen", "bergen wharf"],
+    "city": "Bergen", "country": "Norway", "continent": "Europe",
+    "lat": 60.3973, "lng": 5.3243, "heading": 45, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Norway.", "The name starts with 'B'.", "A row of crooked, colorful Hanseatic warehouses on a rainy harbor."]
+  },
+  {
+    "id": "nyhavn", "name": "Nyhavn",
+    "aliases": ["copenhagen"],
+    "city": "Copenhagen", "country": "Denmark", "continent": "Europe",
+    "lat": 55.6797, "lng": 12.5892, "heading": 60, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Denmark.", "The name starts with 'N'.", "A canal of candy-colored townhouses where Hans Christian Andersen lived."]
+  },
+  {
+    "id": "gamla-stan", "name": "Gamla Stan",
+    "aliases": ["stockholm", "stortorget", "old town stockholm"],
+    "city": "Stockholm", "country": "Sweden", "continent": "Europe",
+    "lat": 59.3251, "lng": 18.0711, "heading": 270, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Sweden.", "The name starts with 'G'.", "The old-town island where the Nobel Museum overlooks a gabled square."]
+  },
+  {
+    "id": "senate-square", "name": "Senate Square",
+    "aliases": ["helsinki", "helsinki cathedral"],
+    "city": "Helsinki", "country": "Finland", "continent": "Europe",
+    "lat": 60.1695, "lng": 24.9525, "heading": 0, "fov": 100,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Finland.", "The name starts with 'S'.", "A neoclassical square beneath a great white-domed cathedral, way up north."]
+  },
+  {
+    "id": "praca-do-comercio", "name": "Praça do Comércio",
+    "aliases": ["lisbon", "lisboa", "terreiro do paco"],
+    "city": "Lisbon", "country": "Portugal", "continent": "Europe",
+    "lat": 38.7075, "lng": -9.1364, "heading": 0, "fov": 100,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Portugal.", "The name starts with 'P'.", "A grand yellow riverfront square in the city of trams and pastel de nata."]
+  },
+  {
+    "id": "ribeira", "name": "Ribeira",
+    "aliases": ["porto", "cais da ribeira", "dom luis bridge"],
+    "city": "Porto", "country": "Portugal", "continent": "Europe",
+    "lat": 41.1408, "lng": -8.6113, "heading": 135, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Portugal.", "The name starts with 'R'.", "A stacked riverside old town facing the port-wine cellars across the Douro."]
+  },
+  {
+    "id": "hungarian-parliament", "name": "Hungarian Parliament",
+    "aliases": ["budapest", "parliament", "orszaghaz", "kossuth square"],
+    "city": "Budapest", "country": "Hungary", "continent": "Europe",
+    "lat": 47.5065, "lng": 19.047, "heading": 315, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Hungary.", "The name starts with 'H'.", "A neo-Gothic parliament sprawling along the Danube."]
+  },
+  {
+    "id": "stradun", "name": "Stradun",
+    "aliases": ["dubrovnik", "old town dubrovnik", "placa"],
+    "city": "Dubrovnik", "country": "Croatia", "continent": "Europe",
+    "lat": 42.6414, "lng": 18.108, "heading": 285, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Croatia.", "The name starts with 'S'.", "The polished limestone main street of King's Landing, basically."]
+  },
+  {
+    "id": "oia", "name": "Oia",
+    "aliases": ["santorini", "blue domes"],
+    "city": "Oia", "country": "Greece", "continent": "Europe",
+    "lat": 36.4618, "lng": 25.3753, "heading": 300, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Greece.", "The name starts with 'O'.", "Whitewashed houses and blue domes stacked on a volcanic caldera."]
+  },
+  {
+    "id": "jet-deau", "name": "Jet d'Eau",
+    "aliases": ["geneva", "geneve", "lake geneva"],
+    "city": "Geneva", "country": "Switzerland", "continent": "Europe",
+    "lat": 46.2074, "lng": 6.1557, "heading": 90, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Switzerland.", "The name starts with 'J'.", "A 140-metre water jet in a lakeside city full of diplomats and watchmakers."]
+  },
+  {
+    "id": "hallgrimskirkja", "name": "Hallgrímskirkja",
+    "aliases": ["reykjavik"],
+    "city": "Reykjavik", "country": "Iceland", "continent": "Europe",
+    "lat": 64.1409, "lng": -21.9273, "heading": 20, "fov": 80,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Iceland.", "The name starts with 'H'.", "A rocket-shaped concrete church above a very volcanic capital."]
+  },
+  {
+    "id": "mont-saint-michel", "name": "Mont Saint-Michel",
+    "aliases": ["le mont saint michel", "normandy"],
+    "city": "Mont-Saint-Michel", "country": "France", "continent": "Europe",
+    "lat": 48.63, "lng": -1.51, "heading": 350, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: France.", "The name starts with 'M'.", "An abbey-topped tidal island off the Normandy coast."]
+  },
+  {
+    "id": "belfry-of-bruges", "name": "Belfry of Bruges",
+    "aliases": ["bruges", "brugge", "markt"],
+    "city": "Bruges", "country": "Belgium", "continent": "Europe",
+    "lat": 51.2093, "lng": 3.2247, "heading": 190, "fov": 90,
+    "hints": ["This continent invented the cobblestone cafe crawl.", "Country: Belgium.", "The name starts with 'B'.", "A medieval bell tower over a market square, star of a certain hitman movie."]
+  },
+  {
+    "id": "times-square", "name": "Times Square",
+    "aliases": ["new york", "nyc", "new york city", "manhattan"],
+    "city": "New York", "country": "United States", "continent": "North America",
+    "lat": 40.758, "lng": -73.9855, "heading": 0, "fov": 100,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: United States.", "The name starts with 'T'.", "Billboards bright enough to read by at midnight, where the ball drops."]
+  },
+  {
+    "id": "golden-gate-bridge", "name": "Golden Gate Bridge",
+    "aliases": ["san francisco", "sf"],
+    "city": "San Francisco", "country": "United States", "continent": "North America",
+    "lat": 37.8078, "lng": -122.475, "heading": 315, "fov": 90,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: United States.", "The name starts with 'G'.", "An International-Orange suspension bridge over a famously foggy strait."]
+  },
+  {
+    "id": "hollywood-walk-of-fame", "name": "Hollywood Walk of Fame",
+    "aliases": ["hollywood", "los angeles", "la", "chinese theatre", "hollywood boulevard"],
+    "city": "Los Angeles", "country": "United States", "continent": "North America",
+    "lat": 34.1019, "lng": -118.3407, "heading": 350, "fov": 100,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: United States.", "The name starts with 'H'.", "Pink terrazzo stars underfoot and celebrity handprints in the concrete."]
+  },
+  {
+    "id": "las-vegas-strip", "name": "Las Vegas Strip",
+    "aliases": ["las vegas", "vegas", "bellagio"],
+    "city": "Las Vegas", "country": "United States", "continent": "North America",
+    "lat": 36.1147, "lng": -115.1728, "heading": 180, "fov": 100,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: United States.", "The name starts with 'L'.", "A desert boulevard with a fake Paris, a fake Venice, and dancing fountains."]
+  },
+  {
+    "id": "white-house", "name": "White House",
+    "aliases": ["washington dc", "dc", "washington", "pennsylvania avenue"],
+    "city": "Washington DC", "country": "United States", "continent": "North America",
+    "lat": 38.8987, "lng": -77.0365, "heading": 180, "fov": 90,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: United States.", "The name starts with 'W'.", "The most famous residential address in America."]
+  },
+  {
+    "id": "cloud-gate", "name": "Cloud Gate",
+    "aliases": ["chicago", "the bean", "millennium park"],
+    "city": "Chicago", "country": "United States", "continent": "North America",
+    "lat": 41.8827, "lng": -87.6233, "heading": 270, "fov": 90,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: United States.", "The name starts with 'C'.", "A giant mirror-polished bean reflecting a windy skyline."]
+  },
+  {
+    "id": "jackson-square", "name": "Jackson Square",
+    "aliases": ["new orleans", "french quarter", "st louis cathedral"],
+    "city": "New Orleans", "country": "United States", "continent": "North America",
+    "lat": 29.9569, "lng": -90.0629, "heading": 0, "fov": 90,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: United States.", "The name starts with 'J'.", "A cathedral-backed square in the home of jazz, beignets, and Mardi Gras."]
+  },
+  {
+    "id": "space-needle", "name": "Space Needle",
+    "aliases": ["seattle"],
+    "city": "Seattle", "country": "United States", "continent": "North America",
+    "lat": 47.6197, "lng": -122.349, "heading": 0, "fov": 80,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: United States.", "The name starts with 'S'.", "A flying saucer on a stick from the 1962 World's Fair."]
+  },
+  {
+    "id": "fenway-park", "name": "Fenway Park",
+    "aliases": ["boston", "fenway", "green monster"],
+    "city": "Boston", "country": "United States", "continent": "North America",
+    "lat": 42.3465, "lng": -71.0961, "heading": 90, "fov": 90,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: United States.", "The name starts with 'F'.", "America's oldest ballpark, home of a big green wall."]
+  },
+  {
+    "id": "niagara-falls", "name": "Niagara Falls",
+    "aliases": ["horseshoe falls", "table rock"],
+    "city": "Niagara Falls", "country": "Canada", "continent": "North America",
+    "lat": 43.0799, "lng": -79.0747, "heading": 130, "fov": 100,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: Canada.", "The name starts with 'N'.", "The honeymoon capital, with a horseshoe-shaped wall of falling water."]
+  },
+  {
+    "id": "cn-tower", "name": "CN Tower",
+    "aliases": ["toronto"],
+    "city": "Toronto", "country": "Canada", "continent": "North America",
+    "lat": 43.6417, "lng": -79.386, "heading": 320, "fov": 80,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: Canada.", "The name starts with 'C'.", "A 553-metre concrete spike with a glass floor, beside a great lake."]
+  },
+  {
+    "id": "chateau-frontenac", "name": "Château Frontenac",
+    "aliases": ["quebec city", "quebec", "dufferin terrace"],
+    "city": "Quebec City", "country": "Canada", "continent": "North America",
+    "lat": 46.8112, "lng": -71.2045, "heading": 315, "fov": 90,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: Canada.", "The name starts with 'C'.", "A castle-like grand railway hotel above the St. Lawrence."]
+  },
+  {
+    "id": "banff-avenue", "name": "Banff Avenue",
+    "aliases": ["banff", "cascade mountain"],
+    "city": "Banff", "country": "Canada", "continent": "North America",
+    "lat": 51.1771, "lng": -115.5708, "heading": 25, "fov": 90,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: Canada.", "The name starts with 'B'.", "A mountain-town main street aimed straight at a Rocky peak."]
+  },
+  {
+    "id": "zocalo", "name": "Zócalo",
+    "aliases": ["mexico city", "cdmx", "plaza de la constitucion"],
+    "city": "Mexico City", "country": "Mexico", "continent": "North America",
+    "lat": 19.4326, "lng": -99.1332, "heading": 0, "fov": 100,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: Mexico.", "The name starts with 'Z'.", "One of the world's largest city squares, built over an Aztec capital."]
+  },
+  {
+    "id": "chichen-itza", "name": "Chichén Itzá",
+    "aliases": ["el castillo", "yucatan"],
+    "city": "Chichén Itzá", "country": "Mexico", "continent": "North America",
+    "lat": 20.6829, "lng": -88.5686, "heading": 90, "fov": 90,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: Mexico.", "The name starts with 'C'.", "A stepped Mayan pyramid where a serpent shadow slithers at the equinox."]
+  },
+  {
+    "id": "old-san-juan", "name": "Old San Juan",
+    "aliases": ["san juan", "calle fortaleza", "el morro"],
+    "city": "San Juan", "country": "Puerto Rico", "continent": "North America",
+    "lat": 18.4655, "lng": -66.114, "heading": 270, "fov": 90,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: Puerto Rico.", "The name starts with 'O'.", "Cobblestones and candy-colored colonial houses inside 500-year-old walls."]
+  },
+  {
+    "id": "grand-canyon", "name": "Grand Canyon",
+    "aliases": ["grand canyon village", "mather point", "south rim"],
+    "city": "Grand Canyon Village", "country": "United States", "continent": "North America",
+    "lat": 36.0616, "lng": -112.1076, "heading": 0, "fov": 100,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: United States.", "The name starts with 'G'.", "A mile-deep gash in Arizona carved by the Colorado."]
+  },
+  {
+    "id": "mount-rushmore", "name": "Mount Rushmore",
+    "aliases": ["keystone", "rushmore", "black hills"],
+    "city": "Keystone", "country": "United States", "continent": "North America",
+    "lat": 43.8783, "lng": -103.4538, "heading": 305, "fov": 90,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: United States.", "The name starts with 'M'.", "Four presidents' faces blasted into a granite cliff."]
+  },
+  {
+    "id": "broadway-nashville", "name": "Broadway",
+    "aliases": ["nashville", "lower broadway", "honky tonk highway"],
+    "city": "Nashville", "country": "United States", "continent": "North America",
+    "lat": 36.1612, "lng": -86.7775, "heading": 270, "fov": 100,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: United States.", "The name starts with 'B'.", "Neon honky-tonks with live country music pouring out of every door."]
+  },
+  {
+    "id": "ocean-drive", "name": "Ocean Drive",
+    "aliases": ["miami", "miami beach", "south beach", "art deco district"],
+    "city": "Miami Beach", "country": "United States", "continent": "North America",
+    "lat": 25.7804, "lng": -80.1301, "heading": 0, "fov": 90,
+    "hints": ["This continent stretches from tundra to tropics — new world, big portions.", "Country: United States.", "The name starts with 'O'.", "Pastel Art Deco hotels and palm trees along a very famous beach."]
+  },
+  {
+    "id": "christ-the-redeemer", "name": "Christ the Redeemer",
+    "aliases": ["rio", "rio de janeiro", "corcovado", "cristo redentor"],
+    "city": "Rio de Janeiro", "country": "Brazil", "continent": "South America",
+    "lat": -22.9519, "lng": -43.2105, "heading": 0, "fov": 90,
+    "hints": ["This continent has the Andes down one side and the Amazon through the middle.", "Country: Brazil.", "The name starts with 'C'.", "A 30-metre statue with open arms above the samba city."]
+  },
+  {
+    "id": "caminito", "name": "Caminito",
+    "aliases": ["buenos aires", "la boca"],
+    "city": "Buenos Aires", "country": "Argentina", "continent": "South America",
+    "lat": -34.6389, "lng": -58.3627, "heading": 45, "fov": 90,
+    "hints": ["This continent has the Andes down one side and the Amazon through the middle.", "Country: Argentina.", "The name starts with 'C'.", "A tango-soaked alley of corrugated houses painted every color at once."]
+  },
+  {
+    "id": "machu-picchu", "name": "Machu Picchu",
+    "aliases": ["aguas calientes", "machupicchu"],
+    "city": "Aguas Calientes", "country": "Peru", "continent": "South America",
+    "lat": -13.1631, "lng": -72.545, "heading": 340, "fov": 100,
+    "hints": ["This continent has the Andes down one side and the Amazon through the middle.", "Country: Peru.", "The name starts with 'M'.", "A lost Inca citadel strung along an Andean ridge."]
+  },
+  {
+    "id": "plaza-de-armas-santiago", "name": "Plaza de Armas",
+    "aliases": ["santiago"],
+    "city": "Santiago", "country": "Chile", "continent": "South America",
+    "lat": -33.4378, "lng": -70.6504, "heading": 0, "fov": 100,
+    "hints": ["This continent has the Andes down one side and the Amazon through the middle.", "Country: Chile.", "The name starts with 'P'.", "The colonial heart of a long, skinny country's capital, ringed by snowy peaks."]
+  },
+  {
+    "id": "plaza-grande-quito", "name": "Plaza Grande",
+    "aliases": ["quito", "plaza de la independencia"],
+    "city": "Quito", "country": "Ecuador", "continent": "South America",
+    "lat": -0.2202, "lng": -78.5123, "heading": 0, "fov": 100,
+    "hints": ["This continent has the Andes down one side and the Amazon through the middle.", "Country: Ecuador.", "The name starts with 'P'.", "The main square of the world's highest capital, sitting right on the equator."]
+  },
+  {
+    "id": "iguazu-falls", "name": "Iguazu Falls",
+    "aliases": ["iguazu", "foz do iguacu", "cataratas do iguacu", "devils throat"],
+    "city": "Foz do Iguaçu", "country": "Brazil", "continent": "South America",
+    "lat": -25.6953, "lng": -54.4367, "heading": 90, "fov": 100,
+    "hints": ["This continent has the Andes down one side and the Amazon through the middle.", "Country: Brazil.", "The name starts with 'I'.", "Hundreds of waterfalls thundering along the Brazil-Argentina border."]
+  },
+  {
+    "id": "walled-city-cartagena", "name": "Walled City of Cartagena",
+    "aliases": ["cartagena", "ciudad amurallada"],
+    "city": "Cartagena", "country": "Colombia", "continent": "South America",
+    "lat": 10.4239, "lng": -75.551, "heading": 45, "fov": 90,
+    "hints": ["This continent has the Andes down one side and the Amazon through the middle.", "Country: Colombia.", "The name starts with 'W'.", "Bougainvillea balconies inside Caribbean colonial ramparts."]
+  },
+  {
+    "id": "plaza-mayor-lima", "name": "Plaza Mayor de Lima",
+    "aliases": ["lima", "plaza de armas de lima"],
+    "city": "Lima", "country": "Peru", "continent": "South America",
+    "lat": -12.0459, "lng": -77.0305, "heading": 0, "fov": 100,
+    "hints": ["This continent has the Andes down one side and the Amazon through the middle.", "Country: Peru.", "The name starts with 'P'.", "The founding square of the City of Kings, near the Pacific."]
+  },
+  {
+    "id": "pyramids-of-giza", "name": "Pyramids of Giza",
+    "aliases": ["giza", "cairo", "great pyramid", "sphinx", "pyramids"],
+    "city": "Giza", "country": "Egypt", "continent": "Africa",
+    "lat": 29.9773, "lng": 31.1325, "heading": 45, "fov": 100,
+    "hints": ["This continent is where humankind took its first steps.", "Country: Egypt.", "The name starts with 'P'.", "The only surviving ancient wonder, guarded by a lion with a pharaoh's head."]
+  },
+  {
+    "id": "va-waterfront", "name": "V&A Waterfront",
+    "aliases": ["cape town", "waterfront", "table mountain"],
+    "city": "Cape Town", "country": "South Africa", "continent": "Africa",
+    "lat": -33.9036, "lng": 18.4196, "heading": 160, "fov": 90,
+    "hints": ["This continent is where humankind took its first steps.", "Country: South Africa.", "The name starts with 'V'.", "A harbor promenade with a big flat-topped mountain looming behind it."]
+  },
+  {
+    "id": "nelson-mandela-square", "name": "Nelson Mandela Square",
+    "aliases": ["johannesburg", "joburg", "sandton"],
+    "city": "Johannesburg", "country": "South Africa", "continent": "Africa",
+    "lat": -26.1076, "lng": 28.0567, "heading": 90, "fov": 90,
+    "hints": ["This continent is where humankind took its first steps.", "Country: South Africa.", "The name starts with 'N'.", "A six-metre bronze statue of a beloved president, outside the shops."]
+  },
+  {
+    "id": "victoria-falls", "name": "Victoria Falls",
+    "aliases": ["livingstone", "mosi oa tunya", "zambezi"],
+    "city": "Livingstone", "country": "Zambia", "continent": "Africa",
+    "lat": -17.9243, "lng": 25.8572, "heading": 200, "fov": 100,
+    "hints": ["This continent is where humankind took its first steps.", "Country: Zambia.", "The name starts with 'V'.", "'The smoke that thunders' — a mile-wide curtain of falling river."]
+  },
+  {
+    "id": "black-star-gate", "name": "Black Star Gate",
+    "aliases": ["accra", "independence square"],
+    "city": "Accra", "country": "Ghana", "continent": "Africa",
+    "lat": 5.5478, "lng": -0.1918, "heading": 180, "fov": 90,
+    "hints": ["This continent is where humankind took its first steps.", "Country: Ghana.", "The name starts with 'B'.", "An independence arch crowned with a single black star."]
+  },
+  {
+    "id": "lekki-ikoyi-bridge", "name": "Lekki-Ikoyi Link Bridge",
+    "aliases": ["lagos", "lekki", "ikoyi"],
+    "city": "Lagos", "country": "Nigeria", "continent": "Africa",
+    "lat": 6.4415, "lng": 3.4152, "heading": 220, "fov": 90,
+    "hints": ["This continent is where humankind took its first steps.", "Country: Nigeria.", "The name starts with 'L'.", "A cable-stayed bridge over a lagoon in Africa's biggest megacity."]
+  },
+  {
+    "id": "kicc", "name": "Kenyatta International Convention Centre",
+    "aliases": ["nairobi", "kicc", "kicc tower"],
+    "city": "Nairobi", "country": "Kenya", "continent": "Africa",
+    "lat": -1.2884, "lng": 36.8233, "heading": 90, "fov": 80,
+    "hints": ["This continent is where humankind took its first steps.", "Country: Kenya.", "The name starts with 'K'.", "A cylindrical seventies tower in a capital with a safari park next door."]
+  },
+  {
+    "id": "sidi-bou-said", "name": "Sidi Bou Said",
+    "aliases": ["tunis", "carthage"],
+    "city": "Sidi Bou Said", "country": "Tunisia", "continent": "Africa",
+    "lat": 36.8687, "lng": 10.3417, "heading": 60, "fov": 90,
+    "hints": ["This continent is where humankind took its first steps.", "Country: Tunisia.", "The name starts with 'S'.", "A blue-and-white clifftop village above the Mediterranean, near ancient Carthage."]
+  },
+  {
+    "id": "african-renaissance-monument", "name": "African Renaissance Monument",
+    "aliases": ["dakar"],
+    "city": "Dakar", "country": "Senegal", "continent": "Africa",
+    "lat": 14.722, "lng": -17.4956, "heading": 300, "fov": 90,
+    "hints": ["This continent is where humankind took its first steps.", "Country: Senegal.", "The name starts with 'A'.", "A 52-metre bronze family striding atop a hill on the continent's westernmost tip."]
+  },
+  {
+    "id": "sydney-opera-house", "name": "Sydney Opera House",
+    "aliases": ["sydney", "opera house", "circular quay"],
+    "city": "Sydney", "country": "Australia", "continent": "Oceania",
+    "lat": -33.8587, "lng": 151.214, "heading": 30, "fov": 90,
+    "hints": ["This continent is mostly ocean — islands, reefs, and very confident wildlife.", "Country: Australia.", "The name starts with 'S'.", "White sails on a harbour, next to a big coathanger of a bridge."]
+  },
+  {
+    "id": "flinders-street-station", "name": "Flinders Street Station",
+    "aliases": ["melbourne", "federation square"],
+    "city": "Melbourne", "country": "Australia", "continent": "Oceania",
+    "lat": -37.8174, "lng": 144.967, "heading": 200, "fov": 100,
+    "hints": ["This continent is mostly ocean — islands, reefs, and very confident wildlife.", "Country: Australia.", "The name starts with 'F'.", "A mustard-yellow domed station where everyone meets under the clocks."]
+  },
+  {
+    "id": "surfers-paradise", "name": "Surfers Paradise",
+    "aliases": ["gold coast", "cavill avenue"],
+    "city": "Gold Coast", "country": "Australia", "continent": "Oceania",
+    "lat": -28.0023, "lng": 153.4292, "heading": 90, "fov": 90,
+    "hints": ["This continent is mostly ocean — islands, reefs, and very confident wildlife.", "Country: Australia.", "The name starts with 'S'.", "High-rises right on the sand — the name tells you exactly what people do here."]
+  },
+  {
+    "id": "uluru", "name": "Uluru",
+    "aliases": ["ayers rock", "yulara"],
+    "city": "Yulara", "country": "Australia", "continent": "Oceania",
+    "lat": -25.3444, "lng": 131.0369, "heading": 0, "fov": 100,
+    "hints": ["This continent is mostly ocean — islands, reefs, and very confident wildlife.", "Country: Australia.", "The name starts with 'U'.", "A giant red sandstone monolith sacred to the Anangu."]
+  },
+  {
+    "id": "sky-tower", "name": "Sky Tower",
+    "aliases": ["auckland"],
+    "city": "Auckland", "country": "New Zealand", "continent": "Oceania",
+    "lat": -36.848, "lng": 174.7625, "heading": 200, "fov": 80,
+    "hints": ["This continent is mostly ocean — islands, reefs, and very confident wildlife.", "Country: New Zealand.", "The name starts with 'S'.", "The southern hemisphere's tallest tower, in the City of Sails."]
+  },
+  {
+    "id": "queenstown-waterfront", "name": "Queenstown Waterfront",
+    "aliases": ["queenstown", "lake wakatipu", "remarkables"],
+    "city": "Queenstown", "country": "New Zealand", "continent": "Oceania",
+    "lat": -45.0325, "lng": 168.6603, "heading": 250, "fov": 90,
+    "hints": ["This continent is mostly ocean — islands, reefs, and very confident wildlife.", "Country: New Zealand.", "The name starts with 'Q'.", "An adrenaline-sports town on a lake beneath the Remarkables."]
+  },
+  {
+    "id": "hobbiton", "name": "Hobbiton",
+    "aliases": ["matamata", "the shire", "bag end"],
+    "city": "Matamata", "country": "New Zealand", "continent": "Oceania",
+    "lat": -37.8721, "lng": 175.6829, "heading": 0, "fov": 90,
+    "hints": ["This continent is mostly ocean — islands, reefs, and very confident wildlife.", "Country: New Zealand.", "The name starts with 'H'.", "Round green doors in grassy hills — second breakfast country."]
+  },
+  {
+    "id": "waikiki-beach", "name": "Waikiki Beach",
+    "aliases": ["honolulu", "hawaii", "oahu", "waikiki", "diamond head"],
+    "city": "Honolulu", "country": "United States", "continent": "Oceania",
+    "lat": 21.2761, "lng": -157.8267, "heading": 120, "fov": 90,
+    "hints": ["This continent is mostly ocean — islands, reefs, and very confident wildlife.", "Country: United States — the island state.", "The name starts with 'W'.", "A surf beach beneath a volcanic crater called Diamond Head."]
+  },
+  {
+    "id": "half-moon-island", "name": "Half Moon Island",
+    "aliases": ["antarctica", "south shetland islands"],
+    "city": "Half Moon Island", "country": "Antarctica", "continent": "Antarctica",
+    "lat": -62.596, "lng": -59.916, "heading": 0, "fov": 100,
+    "hints": ["This continent has zero countries and a great many penguins.", "Country: Antarctica — no countries down here, just a treaty.", "The name starts with 'H'.", "A crescent islet crowded with chinstrap penguins."]
+  }
+]

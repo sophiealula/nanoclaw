@@ -26,21 +26,61 @@ function loadSecrets() {
   return JSON.parse(fs.readFileSync(SECRETS_FILE, 'utf8'));
 }
 
+function decodeBase64(value) {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error('bad encoded secret');
+  }
+  const decoded = Buffer.from(value, 'base64').toString('utf8');
+  if (!decoded || Buffer.from(decoded, 'utf8').toString('base64') !== value) {
+    throw new Error('bad encoded secret');
+  }
+  return decoded;
+}
+
+function validateState(state) {
+  if (!state || typeof state !== 'object') {
+    throw new Error('bad state shape');
+  }
+
+  const secrets = loadSecrets();
+  const secret = decodeBase64(state.secret_b64);
+  const categorySecrets = secrets[state.category];
+
+  if (
+    typeof state.category !== 'string' ||
+    !Array.isArray(categorySecrets) ||
+    !categorySecrets.some((entry) => entry.name === secret) ||
+    !Array.isArray(state.questions) ||
+    state.questions.length >= MAX_QUESTIONS ||
+    !state.questions.every(
+      (entry, index) =>
+        entry &&
+        typeof entry === 'object' &&
+        Number.isInteger(entry.n) &&
+        entry.n === index + 1 &&
+        typeof entry.q === 'string' &&
+        entry.q.trim().length > 0,
+    )
+  ) {
+    throw new Error('bad state shape');
+  }
+
+  if (state.wrongGuesses === undefined) state.wrongGuesses = [];
+  if (
+    !Array.isArray(state.wrongGuesses) ||
+    !state.wrongGuesses.every((guess) => typeof guess === 'string' && guess.trim().length > 0)
+  ) {
+    throw new Error('bad state shape');
+  }
+
+  return state;
+}
+
 function loadState() {
   if (!fs.existsSync(STATE_FILE)) return null;
   try {
     const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-    if (
-      !state ||
-      typeof state !== 'object' ||
-      typeof state.secret_b64 !== 'string' ||
-      typeof state.category !== 'string' ||
-      !Array.isArray(state.questions)
-    ) {
-      throw new Error('bad state shape');
-    }
-    decodeSecret(state); // must decode too, not just parse
-    return state;
+    return validateState(state);
   } catch {
     deleteState();
     console.log("Uh oh — the previous game's state file was corrupted, so I've reset it.");
@@ -60,7 +100,7 @@ function deleteState() {
 }
 
 function decodeSecret(state) {
-  return Buffer.from(state.secret_b64, 'base64').toString('utf8');
+  return decodeBase64(state.secret_b64);
 }
 
 // Lowercase, strip accents, drop apostrophes, turn other punctuation into
@@ -218,12 +258,7 @@ function cmdGuess(rawInput) {
   const secret = decodeSecret(state);
   const targets = [secret, ...aliasesFor(state, secret)].map(normalize);
 
-  // Plural-tolerant fallback: "sloths" should hit "sloth" even if the agent
-  // forgets to singularize (SKILL.md asks it to, but guesses come in hot).
-  const deplural = (t) => t.replace(/s$/, '');
-  const hit = targets.includes(guess) || targets.map(deplural).includes(deplural(guess));
-
-  if (hit) {
+  if (targets.includes(guess)) {
     const n = questionsUsed(state) + 1;
     deleteState();
     console.log(

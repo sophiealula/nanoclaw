@@ -3,7 +3,7 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { DATA_DIR, GROUPS_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -13,6 +13,7 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendImage: (jid: string, filePath: string, caption?: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -235,6 +236,73 @@ function processObsidianWrite(
   }
 }
 
+/**
+ * Process an image IPC file: authorize, translate the container path
+ * (/workspace/group/<rest>) to the host path under the source group's folder,
+ * and hand off to the channel. Rejections are log-only, matching sendMessage.
+ */
+export async function processImageIpc(
+  data: { chatJid: string; path: string; caption?: string },
+  sourceGroup: string,
+  isMain: boolean,
+  deps: IpcDeps,
+  groupsDir: string = GROUPS_DIR,
+): Promise<void> {
+  const targetGroup = deps.registeredGroups()[data.chatJid];
+  if (!(isMain || (targetGroup && targetGroup.folder === sourceGroup))) {
+    logger.warn(
+      { chatJid: data.chatJid, sourceGroup },
+      'Unauthorized IPC image attempt blocked',
+    );
+    return;
+  }
+
+  const rel = path.relative('/workspace/group', data.path);
+  if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
+    logger.warn(
+      { path: data.path, sourceGroup },
+      'IPC image path outside /workspace/group rejected',
+    );
+    return;
+  }
+  const groupRoot = path.resolve(groupsDir, sourceGroup);
+  const hostPath = path.resolve(groupRoot, rel);
+  if (!hostPath.startsWith(groupRoot + path.sep)) {
+    logger.warn(
+      { path: data.path, sourceGroup },
+      'IPC image path escapes group folder, rejected',
+    );
+    return;
+  }
+  // Resolve symlinks and re-check containment so a link inside the group
+  // folder can't smuggle out files from elsewhere on the host. realpathSync
+  // throws on missing files, which subsumes the existence check.
+  let realPath: string;
+  let realGroupRoot: string;
+  try {
+    realPath = fs.realpathSync(hostPath);
+    realGroupRoot = fs.realpathSync(groupRoot);
+  } catch {
+    logger.warn({ hostPath, sourceGroup }, 'IPC image file not found');
+    return;
+  }
+  if (
+    realPath !== realGroupRoot &&
+    !realPath.startsWith(realGroupRoot + path.sep)
+  ) {
+    logger.warn(
+      { path: data.path, hostPath, realPath, sourceGroup },
+      'IPC image path resolves outside group folder, rejected',
+    );
+    return;
+  }
+
+  // Send the resolved path, not hostPath — the container controls the group
+  // folder and could repoint a validated symlink before the async file read.
+  await deps.sendImage(data.chatJid, realPath, data.caption);
+  logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC image sent');
+}
+
 let ipcWatcherRunning = false;
 
 export function startIpcWatcher(deps: IpcDeps): void {
@@ -316,6 +384,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
+              } else if (data.type === 'image' && data.chatJid && data.path) {
+                await processImageIpc(data, sourceGroup, isMain, deps);
               }
               fs.unlinkSync(filePath);
             } catch (err) {

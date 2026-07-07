@@ -74,21 +74,59 @@ function loadWords() {
   return JSON.parse(fs.readFileSync(WORDS_FILE, 'utf8'));
 }
 
+function decodeBase64(value) {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error('bad encoded secret');
+  }
+  const decoded = Buffer.from(value, 'base64').toString('utf8');
+  if (!decoded || Buffer.from(decoded, 'utf8').toString('base64') !== value) {
+    throw new Error('bad encoded secret');
+  }
+  return decoded;
+}
+
+function validateState(state) {
+  if (!state || typeof state !== 'object') {
+    throw new Error('bad state shape');
+  }
+
+  const words = loadWords();
+  const secret = decodeBase64(state.secret_b64);
+  const categoryWords = words[state.category];
+
+  if (
+    typeof state.category !== 'string' ||
+    !Array.isArray(categoryWords) ||
+    !categoryWords.includes(secret) ||
+    !Number.isInteger(state.lives) ||
+    state.lives < 1 ||
+    state.lives > MAX_LIVES ||
+    !Array.isArray(state.guessed) ||
+    !state.guessed.every((letter) => typeof letter === 'string' && /^[a-z]$/.test(letter)) ||
+    new Set(state.guessed).size !== state.guessed.length ||
+    isSolved(secret, state.guessed)
+  ) {
+    throw new Error('bad state shape');
+  }
+
+  if (state.wrongWords === undefined) state.wrongWords = [];
+  if (
+    !Array.isArray(state.wrongWords) ||
+    !state.wrongWords.every(
+      (word) => typeof word === 'string' && word.length > 0 && normalizeWord(word) === word,
+    )
+  ) {
+    throw new Error('bad state shape');
+  }
+
+  return state;
+}
+
 function loadState() {
   if (!fs.existsSync(STATE_FILE)) return null;
   try {
     const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-    if (
-      !state ||
-      typeof state !== 'object' ||
-      typeof state.secret_b64 !== 'string' ||
-      typeof state.category !== 'string' ||
-      typeof state.lives !== 'number' ||
-      !Array.isArray(state.guessed)
-    ) {
-      throw new Error('bad state shape');
-    }
-    return state;
+    return validateState(state);
   } catch {
     deleteState();
     console.log("Uh oh — the previous game's state file was corrupted, so I've reset it.");
@@ -108,7 +146,7 @@ function deleteState() {
 }
 
 function decodeSecret(state) {
-  return Buffer.from(state.secret_b64, 'base64').toString('utf8');
+  return decodeBase64(state.secret_b64);
 }
 
 function gallowsBlock(lives) {
@@ -231,11 +269,7 @@ function cmdGuess(rawInput) {
 
   const input = normalizeWord(rawInput ?? '');
   if (!input) {
-    const raw = (rawInput ?? '').trim();
-    const msg = raw
-      ? `"${raw}" isn't something I can use — guess a single letter (a-z) or the full word.`
-      : 'Guess what, exactly? Try *guess e* or *guess the lion king*.';
-    console.log(msg + '\n\n' + render(state));
+    console.log('Guess what, exactly? Try *guess e* or *guess the lion king*.\n\n' + render(state));
     return;
   }
 
