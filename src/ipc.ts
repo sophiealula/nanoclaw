@@ -258,11 +258,7 @@ export async function processImageIpc(
   }
 
   const rel = path.relative('/workspace/group', data.path);
-  if (
-    rel === '..' ||
-    rel.startsWith('..' + path.sep) ||
-    path.isAbsolute(rel)
-  ) {
+  if (rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
     logger.warn(
       { path: data.path, sourceGroup },
       'IPC image path outside /workspace/group rejected',
