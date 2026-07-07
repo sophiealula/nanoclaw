@@ -1,5 +1,5 @@
 import https from 'https';
-import { Api, Bot } from 'grammy';
+import { Api, Bot, InputFile } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
@@ -308,6 +308,32 @@ export class TelegramChannel implements Channel {
       );
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram message');
+    }
+  }
+
+  async sendImage(
+    jid: string,
+    filePath: string,
+    caption?: string,
+  ): Promise<void> {
+    if (!this.bot) {
+      logger.warn('Telegram bot not initialized');
+      return;
+    }
+
+    try {
+      const numericId = jid.replace(/^tg:/, '');
+      // Telegram caption limit is 1024 characters. Sent as plain text (no
+      // parse_mode) so unbalanced markdown can't fail the whole send.
+      const MAX_CAPTION_LENGTH = 1024;
+      const options =
+        caption !== undefined
+          ? { caption: caption.slice(0, MAX_CAPTION_LENGTH) }
+          : {};
+      await this.bot.api.sendPhoto(numericId, new InputFile(filePath), options);
+      logger.info({ jid, filePath }, 'Telegram image sent');
+    } catch (err) {
+      logger.error({ jid, filePath, err }, 'Failed to send Telegram image');
     }
   }
 

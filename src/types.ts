@@ -102,6 +102,8 @@ export interface Channel {
   ): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: send a local image file with optional caption.
+  sendImage?(jid: string, filePath: string, caption?: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
