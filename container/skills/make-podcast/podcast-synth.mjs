@@ -2,9 +2,11 @@
 /**
  * podcast-synth.mjs — Two-voice podcast synthesis via ElevenLabs, delivered to Telegram.
  *
- * Usage: node podcast-synth.mjs <script-file> <topic> [chat-id]
+ * Usage: node podcast-synth.mjs <script-file> <topic> [chat-id] [narrator-voice-id]
  *
  * Script format: Lines starting with "ALEX:" or "SAM:" for each speaker.
+ * A script with no ALEX:/SAM: labels is synthesized as a single narrator,
+ * using narrator-voice-id if given (default: Alice).
  *
  * Env vars required:
  *   ELEVENLABS_API_KEY
@@ -23,7 +25,7 @@ const MAX_CHARS = 4500;
 const VOICE_ALEX = "Xb7hH8MSUJpSbSDYk0k2"; // Alice — clear, engaging
 const VOICE_SAM = "onwK4e9ZLuTAKqWW03F9";   // Daniel — steady, grounded
 
-function parseDialogue(script) {
+function parseDialogue(script, narratorVoice) {
   const segments = [];
   let currentVoice = null;
   let currentText = [];
@@ -54,7 +56,7 @@ function parseDialogue(script) {
 
   // Fallback: no labels found, treat as single voice
   if (!segments.length) {
-    segments.push({ voice: VOICE_ALEX, text: script });
+    segments.push({ voice: narratorVoice || VOICE_ALEX, text: script });
   }
 
   return segments;
@@ -140,9 +142,9 @@ async function sendAudioToTelegram(audioBuffer, chatId, topic) {
 }
 
 async function main() {
-  const [scriptFile, topic, chatId] = process.argv.slice(2);
+  const [scriptFile, topic, chatId, narratorVoice] = process.argv.slice(2);
   if (!scriptFile || !topic) {
-    console.error("Usage: node podcast-synth.mjs <script-file> <topic> [chat-id]");
+    console.error("Usage: node podcast-synth.mjs <script-file> <topic> [chat-id] [narrator-voice-id]");
     process.exit(1);
   }
   if (!ELEVENLABS_API_KEY) {
@@ -151,13 +153,15 @@ async function main() {
   }
 
   const script = readFileSync(scriptFile, "utf-8");
-  const segments = parseDialogue(script);
+  const segments = parseDialogue(script, narratorVoice);
   const batches = batchSegments(segments);
   console.log(`Synthesizing ${batches.length} segment(s)...`);
 
   const audioParts = [];
   for (let i = 0; i < batches.length; i++) {
-    const name = batches[i].voice === VOICE_ALEX ? "Alex" : "Sam";
+    const name =
+      batches[i].voice === VOICE_ALEX ? "Alex" :
+      batches[i].voice === VOICE_SAM ? "Sam" : "Narrator";
     console.log(`  [${i + 1}/${batches.length}] ${name}: ${batches[i].text.slice(0, 50)}...`);
     audioParts.push(await tts(batches[i].text, batches[i].voice));
   }

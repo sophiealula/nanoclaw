@@ -523,6 +523,8 @@ function buildContainerArgs(
     'ELEVENLABS_AGENT_ID',
     'ELEVENLABS_AGENT_PHONE_NUMBER_ID',
     'TELEGRAM_BOT_TOKEN',
+    'GEMINI_API_KEY',
+    'GEMINI_MODEL',
   ]);
   for (const [key, value] of Object.entries(serviceEnv)) {
     args.push('-e', `${key}=${value}`);
