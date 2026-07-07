@@ -258,7 +258,11 @@ export async function processImageIpc(
   }
 
   const rel = path.relative('/workspace/group', data.path);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+  if (
+    rel === '..' ||
+    rel.startsWith('..' + path.sep) ||
+    path.isAbsolute(rel)
+  ) {
     logger.warn(
       { path: data.path, sourceGroup },
       'IPC image path outside /workspace/group rejected',
@@ -274,8 +278,26 @@ export async function processImageIpc(
     );
     return;
   }
-  if (!fs.existsSync(hostPath)) {
+  // Resolve symlinks and re-check containment so a link inside the group
+  // folder can't smuggle out files from elsewhere on the host. realpathSync
+  // throws on missing files, which subsumes the existence check.
+  let realPath: string;
+  let realGroupRoot: string;
+  try {
+    realPath = fs.realpathSync(hostPath);
+    realGroupRoot = fs.realpathSync(groupRoot);
+  } catch {
     logger.warn({ hostPath, sourceGroup }, 'IPC image file not found');
+    return;
+  }
+  if (
+    realPath !== realGroupRoot &&
+    !realPath.startsWith(realGroupRoot + path.sep)
+  ) {
+    logger.warn(
+      { path: data.path, hostPath, realPath, sourceGroup },
+      'IPC image path resolves outside group folder, rejected',
+    );
     return;
   }
 

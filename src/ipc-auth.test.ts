@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import {
   _initTestDatabase,
@@ -13,6 +13,7 @@ import {
   setRegisteredGroup,
 } from './db.js';
 import { processImageIpc, processTaskIpc, IpcDeps } from './ipc.js';
+import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
 // Set up registered groups used across tests
@@ -572,6 +573,81 @@ describe('IPC image processing', () => {
     );
 
     expect(sent).toHaveLength(0);
+  });
+
+  it('rejects symlinks escaping the group folder', async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipc-outside-'));
+    try {
+      fs.writeFileSync(path.join(outsideDir, 'secret.txt'), 'host-secret');
+      fs.mkdirSync(path.join(groupsDir, 'other-group'), { recursive: true });
+      fs.symlinkSync(outsideDir, path.join(groupsDir, 'other-group', 'evil'));
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+      await processImageIpc(
+        { chatJid: 'other@g.us', path: '/workspace/group/evil/secret.txt' },
+        'other-group',
+        false,
+        deps,
+        groupsDir,
+      );
+
+      expect(sent).toHaveLength(0);
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
+    } finally {
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('allows symlinks that stay inside the group folder', async () => {
+    const realPath = writeGroupFile('other-group', 'real.jpg');
+    const linkPath = path.join(groupsDir, 'other-group', 'link.jpg');
+    fs.symlinkSync(realPath, linkPath);
+
+    await processImageIpc(
+      { chatJid: 'other@g.us', path: '/workspace/group/link.jpg' },
+      'other-group',
+      false,
+      deps,
+      groupsDir,
+    );
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].jid).toBe('other@g.us');
+  });
+
+  it('rejects dangling symlinks', async () => {
+    fs.mkdirSync(path.join(groupsDir, 'other-group'), { recursive: true });
+    fs.symlinkSync(
+      path.join(groupsDir, 'other-group', 'gone.jpg'),
+      path.join(groupsDir, 'other-group', 'dangling.jpg'),
+    );
+
+    await processImageIpc(
+      { chatJid: 'other@g.us', path: '/workspace/group/dangling.jpg' },
+      'other-group',
+      false,
+      deps,
+      groupsDir,
+    );
+
+    expect(sent).toHaveLength(0);
+  });
+
+  it('accepts an in-bounds file whose name starts with ..', async () => {
+    const hostPath = writeGroupFile('other-group', '..config.jpg');
+
+    await processImageIpc(
+      { chatJid: 'other@g.us', path: '/workspace/group/..config.jpg' },
+      'other-group',
+      false,
+      deps,
+      groupsDir,
+    );
+
+    expect(sent).toEqual([
+      { jid: 'other@g.us', filePath: hostPath, caption: undefined },
+    ]);
   });
 });
 
