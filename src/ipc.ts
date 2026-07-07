@@ -297,7 +297,9 @@ export async function processImageIpc(
     return;
   }
 
-  await deps.sendImage(data.chatJid, hostPath, data.caption);
+  // Send the resolved path, not hostPath — the container controls the group
+  // folder and could repoint a validated symlink before the async file read.
+  await deps.sendImage(data.chatJid, realPath, data.caption);
   logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC image sent');
 }
 

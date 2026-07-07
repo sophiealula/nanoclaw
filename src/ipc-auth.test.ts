@@ -464,7 +464,9 @@ describe('IPC image processing', () => {
     const hostPath = path.join(groupsDir, groupFolder, rel);
     fs.mkdirSync(path.dirname(hostPath), { recursive: true });
     fs.writeFileSync(hostPath, 'jpg-bytes');
-    return hostPath;
+    // processImageIpc sends the symlink-resolved path, so expectations must
+    // compare against it too (macOS tmpdir is itself a /var → /private/var link)
+    return fs.realpathSync(hostPath);
   }
 
   it('routes an image to sendImage with the translated host path', async () => {
@@ -614,6 +616,9 @@ describe('IPC image processing', () => {
 
     expect(sent).toHaveLength(1);
     expect(sent[0].jid).toBe('other@g.us');
+    // The resolved target must be sent, not the symlink — a container could
+    // repoint the link between validation and the async file read.
+    expect(sent[0].filePath).toBe(realPath);
   });
 
   it('rejects dangling symlinks', async () => {
