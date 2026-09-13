@@ -279,8 +279,11 @@ This is the reason third-party iPod tools have a reputation for mysteriously pro
 
 Starting with the 2007 models, Apple added a firmware-validated checksum over the database. Mismatch → the iPod reports zero songs, with no error, despite the files being present.
 
-- **`hash58`** (offset 0x58 in `mhbd`) — the first wave, covering **iPod Classic** and Nano 3rd/4th gen. Reverse-engineered and implemented in libgpod. Requires the device's `FirewireGuid`, read from `SysInfoExtended` on the device (libgpod ships `ipod-read-sysinfo-extended`, which pulls it over SCSI inquiry).
+- **`hash58`** (offset 0x58 in `mhbd`) — the first wave, covering **iPod Classic** and Nano 3rd/4th gen, and also used on the Nano 5G. Reverse-engineered and implemented in libgpod. Requires the device's `FirewireGuid`, read from `SysInfoExtended` on the device (libgpod ships `ipod-read-sysinfo-extended`, which pulls it over SCSI inquiry).
+- **`hash72`** (offset 0x72) — used on iPhone/iPod Touch-era devices against `iTunesCDB` rather than `iTunesDB`. Out of scope here but worth knowing when reading libgpod source, since the two code paths sit side by side and are easy to confuse.
 - **`hashAB`** (offset 0xAB) — later firmware, keyed, substantially harder. libgpod's support is incomplete. This is precisely why "gtkpod wrote my Nano 7 and it shows empty" is a perennial complaint.
+
+Verify the specific offset/algorithm against current libgpod source before implementing — this area is reverse-engineered, documented inconsistently across the web, and the three hashes are routinely conflated in forum posts.
 
 **For the iPod Classic — the device in scope — `hash58` applies and libgpod handles it.** Strategy B is genuinely viable for a Classic. Confirm `SysInfoExtended` is present on the device during `open()` and fail loudly if it isn't, rather than writing a database the firmware will reject.
 
@@ -342,6 +345,21 @@ When a track leaves a Spotify playlist, remove it from the iPod playlist but **k
 **M1 is the gate.** If match rates on a real library are poor, no amount of device-writing polish saves the product. Measure before proceeding.
 
 ---
+
+## Prior art to evaluate before building
+
+Survey done 2026-09-13; none verified hands-on. Evaluate at M0 — several of these may collapse whole milestones.
+
+| Project | Covers | Note |
+|---|---|---|
+| **iOpenPod** (`TheRealSavi/iOpenPod`) | M5 | Cross-platform iTunes alternative, pure-Python `iTunesDB` engine, FLAC→ALAC auto-conversion. Claims to write modern checksums that libgpod cannot. **If that claim holds it is the single most valuable find here** — it addresses the hashAB limitation *and* stage 6. Verify before relying on it. |
+| **libgpod forks** (`gtkpod/`, `clementine-player/`, `strawberrymusicplayer/`) | M5 | Upstream is effectively abandoned. The Clementine fork adds cmake; Strawberry's is actively carried by a live project, so it's the better base. |
+| **beets** (`beetbox/beets`) | M1, M3 | Mature library manager with MusicBrainz matching and a Spotify plugin. Its autotagger is a far better starting point than a hand-rolled match cascade — the plugin does metadata matching and Spotify ID storage already. |
+| **playlist-sync-matcher** (`vtietz/`) | M1, M2 | Turns streaming playlists into M3U pointing at local files, marks missing tracks, emits reports. Closest existing thing to stages 1–5. |
+| **spotpl** (`khrykin/`) | M1 | CLI matching local library to a Spotify playlist, reports non-matches. |
+| **Syncify** (`MadManJohnSmith/`) | M1 | Compares Liked Songs against a local collection with fuzzy matching, identifies missing. |
+
+The build-versus-adopt call changes significantly depending on iOpenPod's real state. Spend the first day of M0 on that, not on writing code.
 
 ## Open questions / risks
 
