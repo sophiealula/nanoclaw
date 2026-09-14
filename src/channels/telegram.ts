@@ -18,6 +18,9 @@ export interface TelegramChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+const POLL_RESTART_INITIAL_MS = 5_000;
+const POLL_RESTART_MAX_MS = 300_000;
+
 /**
  * Send a message with Telegram Markdown parse mode, falling back to plain text.
  * Claude's output naturally matches Telegram's Markdown v1 format:
@@ -47,6 +50,7 @@ export class TelegramChannel implements Channel {
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
   private botToken: string;
+  private pollRestartDelayMs = POLL_RESTART_INITIAL_MS;
 
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
@@ -234,22 +238,80 @@ export class TelegramChannel implements Channel {
       logger.error({ err: err.message }, 'Telegram bot error');
     });
 
-    // Start polling — returns a Promise that resolves when started
+    // Start polling — resolves once the first poll connects
     return new Promise<void>((resolve) => {
-      this.bot!.start({
+      this.startPolling((botInfo) => {
+        console.log(`\n  Telegram bot: @${botInfo.username}`);
+        console.log(
+          `  Send /chatid to the bot to get a chat's registration ID\n`,
+        );
+        resolve();
+      });
+    });
+  }
+
+  // grammY's bot.start() promise settles when the polling loop exits — it
+  // resolves after bot.stop() and rejects if the loop throws — and nothing
+  // restarts it. On 2026-08-12 the loop died silently: inbound Telegram was
+  // dark for two days while outbound sends and the scheduler kept running.
+  // Supervise it: any exit we didn't request gets logged and restarted with
+  // exponential backoff (reset on successful reconnect).
+  private startPolling(
+    onFirstConnect?: (botInfo: { username: string }) => void,
+  ): void {
+    const bot = this.bot;
+    if (!bot) return;
+    let firstConnect = onFirstConnect;
+    Promise.resolve(
+      bot.start({
         onStart: (botInfo) => {
+          this.pollRestartDelayMs = POLL_RESTART_INITIAL_MS;
           logger.info(
             { username: botInfo.username, id: botInfo.id },
             'Telegram bot connected',
           );
-          console.log(`\n  Telegram bot: @${botInfo.username}`);
-          console.log(
-            `  Send /chatid to the bot to get a chat's registration ID\n`,
-          );
-          resolve();
+          firstConnect?.(botInfo);
+          firstConnect = undefined;
         },
+      }),
+    )
+      .catch((err) => {
+        logger.error({ err }, 'Telegram polling loop threw');
+      })
+      .then(() => {
+        // this.bot changed → disconnect() or a fresh connect() owns the
+        // lifecycle now; this loop's exit is expected.
+        if (this.bot !== bot) return;
+        logger.error(
+          { retryInMs: this.pollRestartDelayMs },
+          'Telegram polling stopped unexpectedly, restarting',
+        );
+        setTimeout(() => this.startPolling(), this.pollRestartDelayMs);
+        this.pollRestartDelayMs = Math.min(
+          this.pollRestartDelayMs * 2,
+          POLL_RESTART_MAX_MS,
+        );
       });
-    });
+  }
+
+  // Cutting a UTF-16 string at an arbitrary index can land inside a surrogate
+  // pair (any emoji above U+FFFF), leaving a lone high surrogate at the end of
+  // one piece — Telegram rejects the whole send with
+  // "400: Bad Request: strings must be encoded in UTF-8". Back the cut off by
+  // one so the pair stays intact. Same pattern as safeSlice in
+  // container/agent-runner/src/ipc-mcp-stdio.ts.
+  private static splitSurrogateSafe(text: string, maxLen: number): string[] {
+    if (text.length <= maxLen) return [text];
+    const chunks: string[] = [];
+    let i = 0;
+    while (i < text.length) {
+      let end = Math.min(i + maxLen, text.length);
+      const last = text.charCodeAt(end - 1);
+      if (end < text.length && last >= 0xd800 && last <= 0xdbff) end--;
+      chunks.push(text.slice(i, end));
+      i = end;
+    }
+    return chunks;
   }
 
   async sendMessage(
@@ -290,14 +352,15 @@ export class TelegramChannel implements Channel {
       if (text.length <= MAX_LENGTH) {
         await sendTelegramMessage(this.bot.api, numericId, text, options);
       } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
+        const chunks = TelegramChannel.splitSurrogateSafe(text, MAX_LENGTH);
+        for (let c = 0; c < chunks.length; c++) {
           // Attach the keyboard (if any) only to the final chunk so it lands last
-          const isLast = i + MAX_LENGTH >= text.length;
+          const isLast = c === chunks.length - 1;
           const { reply_markup, ...base } = options;
           await sendTelegramMessage(
             this.bot.api,
             numericId,
-            text.slice(i, i + MAX_LENGTH),
+            chunks[c],
             isLast ? options : base,
           );
         }
@@ -328,7 +391,12 @@ export class TelegramChannel implements Channel {
       const MAX_CAPTION_LENGTH = 1024;
       const options =
         caption !== undefined
-          ? { caption: caption.slice(0, MAX_CAPTION_LENGTH) }
+          ? {
+              caption: TelegramChannel.splitSurrogateSafe(
+                caption,
+                MAX_CAPTION_LENGTH,
+              )[0],
+            }
           : {};
       await this.bot.api.sendPhoto(numericId, new InputFile(filePath), options);
       logger.info({ jid, filePath }, 'Telegram image sent');

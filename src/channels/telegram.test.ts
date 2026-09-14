@@ -63,11 +63,25 @@ vi.mock('grammy', () => ({
       this.errorHandler = handler;
     }
 
+    startCalls = 0;
+    pollResolve: (() => void) | null = null;
+    pollReject: ((err: Error) => void) | null = null;
+
+    // Models real grammY: start() resolves onStart immediately, and the
+    // returned promise settles only when the polling loop exits (resolve on
+    // stop(), reject if the loop throws).
     start(opts: { onStart: (botInfo: any) => void }) {
+      this.startCalls++;
       opts.onStart({ username: 'andy_ai_bot', id: 12345 });
+      return new Promise<void>((resolve, reject) => {
+        this.pollResolve = resolve;
+        this.pollReject = reject;
+      });
     }
 
-    stop() {}
+    stop() {
+      this.pollResolve?.();
+    }
   },
   InputFile: class MockInputFile {
     file: string;
@@ -253,6 +267,72 @@ describe('TelegramChannel', () => {
       const channel = new TelegramChannel('test-token', opts);
 
       expect(channel.isConnected()).toBe(false);
+    });
+  });
+
+  // --- Polling supervision ---
+
+  describe('polling supervision', () => {
+    // Why: on 2026-08-12 grammY's polling loop died silently and inbound
+    // Telegram was dark for two days while the rest of the process kept
+    // running. Any loop exit we didn't request must restart.
+
+    it('restarts polling when the loop rejects', async () => {
+      vi.useFakeTimers();
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+      const bot = currentBot();
+      expect(bot.startCalls).toBe(1);
+
+      bot.pollReject!(new Error('poll loop died'));
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(bot.startCalls).toBe(2);
+      vi.useRealTimers();
+    });
+
+    it('restarts polling when the loop resolves without disconnect()', async () => {
+      vi.useFakeTimers();
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+      const bot = currentBot();
+
+      bot.pollResolve!();
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(bot.startCalls).toBe(2);
+      vi.useRealTimers();
+    });
+
+    it('does not restart polling after disconnect()', async () => {
+      vi.useFakeTimers();
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+      const bot = currentBot();
+
+      await channel.disconnect();
+      await vi.advanceTimersByTimeAsync(300_000);
+
+      expect(bot.startCalls).toBe(1);
+      vi.useRealTimers();
+    });
+
+    it('resets the restart delay after a successful reconnect', async () => {
+      vi.useFakeTimers();
+      const channel = new TelegramChannel('test-token', createTestOpts());
+      await channel.connect();
+      const bot = currentBot();
+
+      bot.pollReject!(new Error('boom'));
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(bot.startCalls).toBe(2);
+
+      // Second failure: reconnect succeeded in between (onStart ran), so the
+      // delay resets to 5s rather than doubling.
+      bot.pollReject!(new Error('boom again'));
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(bot.startCalls).toBe(3);
+      vi.useRealTimers();
     });
   });
 
@@ -830,6 +910,30 @@ describe('TelegramChannel', () => {
       );
     });
 
+    it('does not split a surrogate pair at the 4096 chunk boundary', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      // Emoji occupies UTF-16 indices 4095 (high surrogate) and 4096 (low),
+      // straddling the chunk boundary. A naive slice(0, 4096) ends the first
+      // chunk with a lone high surrogate and Telegram rejects it as
+      // "strings must be encoded in UTF-8".
+      const text = 'x'.repeat(4095) + '📞' + 'y'.repeat(500);
+      await channel.sendMessage('tg:100200300', text);
+
+      const calls = currentBot().api.sendMessage.mock.calls;
+      expect(calls.length).toBe(2);
+      const chunks = calls.map((c: any[]) => c[1]);
+      for (const chunk of chunks) {
+        const last = chunk.charCodeAt(chunk.length - 1);
+        expect(last >= 0xd800 && last <= 0xdbff).toBe(false);
+        const first = chunk.charCodeAt(0);
+        expect(first >= 0xdc00 && first <= 0xdfff).toBe(false);
+      }
+      expect(chunks.join('')).toBe(text);
+    });
+
     it('sends exactly one message at 4096 characters', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
@@ -929,6 +1033,23 @@ describe('TelegramChannel', () => {
 
       const [, , options] = currentBot().api.sendPhoto.mock.calls[0];
       expect(options).toEqual({ caption: 'z'.repeat(1024) });
+    });
+
+    it('does not leave a lone high surrogate when truncating a caption', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      // Emoji straddles the 1024 truncation point: index 1023 is the high
+      // surrogate, 1024 the low. Naive slice(0, 1024) keeps the orphan half.
+      await channel.sendImage!(
+        'tg:100200300',
+        '/tmp/photo.jpg',
+        'z'.repeat(1023) + '📞' + 'more',
+      );
+
+      const [, , options] = currentBot().api.sendPhoto.mock.calls[0];
+      expect(options).toEqual({ caption: 'z'.repeat(1023) });
     });
 
     it('handles send failure gracefully', async () => {
