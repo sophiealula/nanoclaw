@@ -45,6 +45,7 @@ vi.mock('fs', async () => {
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
+      chmodSync: vi.fn(),
     },
   };
 });
@@ -52,6 +53,14 @@ vi.mock('fs', async () => {
 // Mock mount-security
 vi.mock('./mount-security.js', () => ({
   validateAdditionalMounts: vi.fn(() => []),
+}));
+
+// Mock env reader (controls what service secrets exist)
+vi.mock('./env.js', () => ({
+  readEnvFile: vi.fn(() => ({
+    ELEVENLABS_API_KEY: 'sk_test_secret_value',
+    TELEGRAM_BOT_TOKEN: '999:test_bot_token',
+  })),
 }));
 
 // Mock container-runtime
@@ -226,5 +235,64 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('secret transport', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('passes service secrets via --env-file, never on the command line', async () => {
+    const { spawn } = await import('child_process');
+    const fsMock = (await import('fs')).default;
+    vi.mocked(spawn).mockClear();
+    vi.mocked(fsMock.writeFileSync).mockClear();
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
+
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+      newSessionId: 'session-789',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const args = vi.mocked(spawn).mock.calls[0][1] as string[];
+    // Secrets must not appear in any argv element — argv is world-readable via ps
+    expect(args.join(' ')).not.toContain('sk_test_secret_value');
+    expect(args.join(' ')).not.toContain('999:test_bot_token');
+
+    // Instead they travel in an env file passed by path
+    const envFileIdx = args.indexOf('--env-file');
+    expect(envFileIdx).toBeGreaterThan(-1);
+    const envFilePath = args[envFileIdx + 1];
+
+    const write = vi
+      .mocked(fsMock.writeFileSync)
+      .mock.calls.find((c) => c[0] === envFilePath);
+    expect(write).toBeDefined();
+    expect(write![1]).toContain('ELEVENLABS_API_KEY=sk_test_secret_value');
+    expect(write![1]).toContain('TELEGRAM_BOT_TOKEN=999:test_bot_token');
+    expect(write![2]).toMatchObject({ mode: 0o600 });
+
+    // Existing files keep loose perms unless re-tightened
+    expect(vi.mocked(fsMock.chmodSync)).toHaveBeenCalledWith(
+      envFilePath,
+      0o600,
+    );
   });
 });

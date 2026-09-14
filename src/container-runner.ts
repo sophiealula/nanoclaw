@@ -497,6 +497,22 @@ function buildVolumeMounts(
   return mounts;
 }
 
+// The only reader is the container CLI spawned synchronously after this
+// returns, and this process is the only writer, so a plain overwrite is safe.
+// chmod as well as mode: writeFileSync's mode only applies on creation.
+function writeServiceEnvFile(env: Record<string, string>): string {
+  const envDir = path.join(DATA_DIR, 'env');
+  fs.mkdirSync(envDir, { recursive: true });
+  const filePath = path.join(envDir, 'container.env');
+  const content =
+    Object.entries(env)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n') + '\n';
+  fs.writeFileSync(filePath, content, { mode: 0o600 });
+  fs.chmodSync(filePath, 0o600);
+  return filePath;
+}
+
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
@@ -515,7 +531,9 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Pass optional service API keys for container skills (e.g. podcast synthesis)
+  // Pass optional service API keys for container skills (e.g. podcast synthesis).
+  // These go through --env-file, NOT -e: every `-e KEY=value` lands on the
+  // container CLI's argv, which any local process can read via `ps`.
   const serviceEnv = readEnvFile([
     'ELEVENLABS_API_KEY',
     'ELEVENLABS_VOICE_ID',
@@ -527,8 +545,8 @@ function buildContainerArgs(
     'GEMINI_MODEL',
     'GOOGLE_MAPS_API_KEY',
   ]);
-  for (const [key, value] of Object.entries(serviceEnv)) {
-    args.push('-e', `${key}=${value}`);
+  if (Object.keys(serviceEnv).length > 0) {
+    args.push('--env-file', writeServiceEnvFile(serviceEnv));
   }
 
   // Route API traffic through the credential proxy (containers never see real secrets)
