@@ -165,6 +165,23 @@ Wait for her answer, then write the entry with the clarification included. Don't
 - She explicitly skips ("just save it")
 - It's a quick mention adjacent to another task (don't interrupt her flow)
 
+### Scout feedback (learning loop)
+
+The weekly scout saves each run's picks to `/workspace/group/scout-picks/YYYY-MM-DD.md` (the Thursday it ran). When Sophie says anything about a scout pick — "went to Queen!", "loved the Ashadu show", "pass on Objekt", "skipped all of them", a reply to the Monday check-in — that is a capture. Read the most recent picks file to match what she's talking about, then append to `additions.md`:
+
+```
+### YYYY-MM-DD / [type] / [pick name] — scout feedback
+
+[Her words, verbatim]
+
+From the YYYY-MM-DD scout ([category], ranked #N). Outcome: went / skipped / passed. [Her reason if she gave one.]
+```
+
+- **Went and liked it (or didn't):** if she gave no detail, ask the one clarifying question as usual ("what was the room like?").
+- **Passed / skipped:** write it without asking. Don't make her justify a no. If she gives a reason ("too techno", "too far"), that's the most useful signal — keep it verbatim.
+- **"Skipped all of them"** with no reason: one entry for the scout date, outcome skipped, no question.
+- Same HARD RULE as above: no "Saved!" until the Write call succeeded.
+
 ### Don't touch the canonical files
 
 `taste.md`, `music-events.md`, `restaurants.md` are write-locked by convention (not filesystem) — agent never modifies them. All captures go to `additions.md` only. Synthesis into the canonical files happens manually via Mac Claude Code.
