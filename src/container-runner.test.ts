@@ -248,6 +248,31 @@ describe('secret transport', () => {
     vi.useRealTimers();
   });
 
+  it('does not hand service secrets to non-main groups', async () => {
+    const { spawn } = await import('child_process');
+    vi.mocked(spawn).mockClear();
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput, isMain: false },
+      () => {},
+      vi.fn(async () => {}),
+    );
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+      newSessionId: 'session-790',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const args = vi.mocked(spawn).mock.calls[0][1] as string[];
+    expect(args).not.toContain('--env-file');
+    expect(args.join(' ')).not.toContain('999:test_bot_token');
+  });
+
   it('passes service secrets via --env-file, never on the command line', async () => {
     const { spawn } = await import('child_process');
     const fsMock = (await import('fs')).default;
@@ -256,7 +281,7 @@ describe('secret transport', () => {
 
     const resultPromise = runContainerAgent(
       testGroup,
-      testInput,
+      { ...testInput, isMain: true },
       () => {},
       vi.fn(async () => {}),
     );

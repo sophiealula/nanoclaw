@@ -8,6 +8,7 @@ import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { expandPath } from './mount-security.js';
 import { isRawTransportError } from './transport-error.js';
 import { RegisteredGroup } from './types.js';
 
@@ -46,13 +47,13 @@ function resolveObsidianHostPath(
   if (!mounts) return null;
 
   const exact = mounts.find((m) => m.containerPath === dir);
-  if (exact) return exact.hostPath;
+  if (exact) return expandPath(exact.hostPath);
 
   const vault = mounts.find((m) => m.containerPath === 'vault');
   if (!vault) return null;
 
-  const candidate = path.resolve(vault.hostPath, dir);
-  const vaultRoot = path.resolve(vault.hostPath);
+  const vaultRoot = expandPath(vault.hostPath);
+  const candidate = path.resolve(vaultRoot, dir);
   if (candidate !== vaultRoot && !candidate.startsWith(vaultRoot + path.sep)) {
     return null;
   }
@@ -99,6 +100,20 @@ function processObsidianWrite(
 
   const filePath = path.join(hostDir, data.file);
 
+  // Prevent path traversal for every action, not just create_file
+  const resolvedFile = path.resolve(filePath);
+  const resolvedDir = path.resolve(hostDir);
+  if (
+    resolvedFile !== resolvedDir &&
+    !resolvedFile.startsWith(resolvedDir + path.sep)
+  ) {
+    logger.warn(
+      { filePath, hostDir, groupFolder: data.groupFolder },
+      'Obsidian write: path traversal blocked',
+    );
+    return;
+  }
+
   // create_file is handled separately — file must NOT already exist
   if (data.action === 'create_file') {
     if (!data.content) {
@@ -109,15 +124,6 @@ function processObsidianWrite(
       logger.warn(
         { filePath },
         'Obsidian create_file: file already exists, skipping',
-      );
-      return;
-    }
-    // Prevent path traversal
-    const resolved = path.resolve(filePath);
-    if (!resolved.startsWith(path.resolve(hostDir))) {
-      logger.warn(
-        { filePath, hostDir },
-        'Obsidian create_file: path traversal blocked',
       );
       return;
     }
@@ -765,8 +771,12 @@ export async function processTaskIpc(
       break;
 
     case 'obsidian_write':
+      // Identity comes from the IPC directory (sourceGroup), never from the payload.
       processObsidianWrite(
-        data as unknown as Parameters<typeof processObsidianWrite>[0],
+        {
+          ...(data as unknown as Parameters<typeof processObsidianWrite>[0]),
+          groupFolder: sourceGroup,
+        },
         registeredGroups,
       );
       break;

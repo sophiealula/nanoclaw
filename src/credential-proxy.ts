@@ -23,6 +23,22 @@ export interface ProxyConfig {
   authMode: AuthMode;
 }
 
+/**
+ * Only loopback and container-network clients may use the proxy. It listens on
+ * 0.0.0.0 (the bridge interface may not exist at boot), so this check is what
+ * keeps a LAN peer from spending the operator's Anthropic credentials.
+ */
+export function isAllowedProxyClient(
+  remoteAddress: string | undefined,
+): boolean {
+  if (!remoteAddress) return false;
+  const addr = remoteAddress.replace(/^::ffff:/, '');
+  if (addr === '127.0.0.1' || addr === '::1') return true;
+  if (/^192\.168\.64\.\d{1,3}$/.test(addr)) return true; // Apple Container bridge
+  if (/^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(addr)) return true; // Docker bridges
+  return false;
+}
+
 export function startCredentialProxy(
   port: number,
   host = '127.0.0.1',
@@ -46,6 +62,16 @@ export function startCredentialProxy(
 
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
+      if (!isAllowedProxyClient(req.socket.remoteAddress)) {
+        logger.warn(
+          { remoteAddress: req.socket.remoteAddress, url: req.url },
+          'Credential proxy: rejected non-container client',
+        );
+        res.writeHead(403);
+        res.end();
+        req.resume();
+        return;
+      }
       const chunks: Buffer[] = [];
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {

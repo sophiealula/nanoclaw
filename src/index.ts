@@ -649,6 +649,8 @@ function ensureContainerSystemRunning(): void {
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
+  // 0.0.0.0 because the container bridge interface may not exist yet at boot;
+  // the proxy itself rejects any client that is not loopback or a container.
   await startCredentialProxy(CREDENTIAL_PROXY_PORT, '0.0.0.0');
   // Clean up orphaned containers only after we've successfully bound the port.
   // Running this before the bind allows crash-looping duplicates to kill
@@ -721,15 +723,6 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
-      // Remote control commands — intercept before storage
-      const trimmed = msg.content.trim();
-      if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
-        handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
-          logger.error({ err, chatJid }, 'Remote control command error'),
-        );
-        return;
-      }
-
       // Sender allowlist drop mode: discard messages from denied senders before storing
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
         const cfg = loadSenderAllowlist();
@@ -745,6 +738,16 @@ async function main(): Promise<void> {
           }
           return;
         }
+      }
+
+      // Remote control commands — after the allowlist (a dropped sender must not
+      // be able to open a host shell), before storage.
+      const trimmed = msg.content.trim();
+      if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
+        handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
+          logger.error({ err, chatJid }, 'Remote control command error'),
+        );
+        return;
       }
       storeMessage(msg);
     },

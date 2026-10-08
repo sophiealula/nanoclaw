@@ -6,6 +6,7 @@ import twilio from 'twilio';
 import { ASSISTANT_NAME } from '../config.js';
 import { setRegisteredGroup, getRegisteredGroup } from '../db.js';
 import { readEnvFile } from '../env.js';
+import { verifyTwilioSignature } from '../twilio-signature.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -23,11 +24,14 @@ const SPEECH_LANGUAGE = 'en-US';
 
 const PERSONAL_JID = 'twilio-voice:personal';
 
-// Forward inbound calls to Soph's cellphone. The Twilio number's VoiceUrl
-// points at `${WEBHOOK_BASE_URL}/voice/forward`, which returns TwiML that dials
-// this number. Used so outsiders calling +1-918-534-8157 reach Soph directly
-// (not the ElevenLabs phone-research agent, which is outbound-only).
-const FORWARD_TO_NUMBER = '+1XXXXXXXXXX';
+// Inbound calls to the Twilio number are dialed through to the operator's own
+// phone (TWILIO_FORWARD_TO_NUMBER in .env). The number's VoiceUrl points at
+// `${WEBHOOK_BASE_URL}/voice/forward`, which returns TwiML that dials it.
+
+// Abandoned calls (no /voice/status callback) must not accumulate forever.
+const TRANSCRIPT_TTL_MS = 2 * 60 * 60 * 1000;
+
+export type SignatureMode = 'off' | 'log' | 'enforce';
 
 // Generate a short 800Hz sine wave tone as a WAV buffer (0.3s, 8kHz mono μ-law)
 function generateToneWav(): Buffer {
@@ -89,12 +93,27 @@ export class TwilioVoiceChannel implements Channel {
   private onMeta: OnChatMetadata;
 
   private baseUrl: string;
+  private authToken: string;
+  private signatureMode: SignatureMode;
+  private forwardTo: string | undefined;
 
-  constructor(opts: ChannelOpts, port: number, baseUrl: string) {
+  constructor(
+    opts: ChannelOpts,
+    port: number,
+    baseUrl: string,
+    security: {
+      authToken: string;
+      signatureMode?: SignatureMode;
+      forwardTo?: string;
+    },
+  ) {
     this.onMsg = opts.onMessage;
     this.onMeta = opts.onChatMetadata;
     this.port = port;
     this.baseUrl = baseUrl;
+    this.authToken = security.authToken;
+    this.signatureMode = security.signatureMode ?? 'log';
+    this.forwardTo = security.forwardTo;
 
     this.server = http.createServer((req, res) => this.handleRequest(req, res));
   }
@@ -155,38 +174,43 @@ export class TwilioVoiceChannel implements Channel {
       return;
     }
 
-    // /voice/forward — inbound-call forwarder. Anyone calling the registered
-    // Twilio number is dialed through to Soph's cell. Accepts GET + POST so
-    // Twilio's webhook config works either way.
-    if (pathname === '/voice/forward') {
-      let from = 'unknown';
-      try {
-        if (req.method === 'POST') {
-          const body = await readBody(req);
-          from = parseFormBody(body).From || 'unknown';
-        } else {
-          from = url.searchParams.get('From') || 'unknown';
-        }
-      } catch {
-        /* ignore — we still forward */
-      }
-      logger.info({ from }, 'Inbound call → forwarding to Soph cell');
-      const twiml = new VoiceResponse();
-      twiml.dial({ timeout: 25, answerOnBridge: true }, FORWARD_TO_NUMBER);
-      res.writeHead(200, { 'Content-Type': 'text/xml' });
-      res.end(twiml.toString());
-      return;
-    }
-
-    if (req.method !== 'POST') {
+    // Everything below is a Twilio webhook. The server is reachable through a
+    // public tunnel, so every request must carry a valid X-Twilio-Signature —
+    // otherwise anyone with the URL can inject text into a main-group agent or
+    // use /voice/forward as a free call relay.
+    if (pathname !== '/voice/forward' && req.method !== 'POST') {
       res.writeHead(405);
       res.end();
       return;
     }
 
     try {
-      const body = await readBody(req);
-      const params = parseFormBody(body);
+      const params =
+        req.method === 'POST' ? parseFormBody(await readBody(req)) : {};
+      if (!this.checkSignature(req, url, params)) {
+        res.writeHead(403);
+        res.end();
+        return;
+      }
+
+      if (pathname === '/voice/forward') {
+        const from = params.From || url.searchParams.get('From') || 'unknown';
+        if (!this.forwardTo) {
+          logger.error(
+            { from },
+            'Inbound call but TWILIO_FORWARD_TO_NUMBER is not set',
+          );
+          res.writeHead(503);
+          res.end();
+          return;
+        }
+        logger.info({ from }, 'Inbound call → forwarding to operator phone');
+        const twiml = new VoiceResponse();
+        twiml.dial({ timeout: 25, answerOnBridge: true }, this.forwardTo);
+        res.writeHead(200, { 'Content-Type': 'text/xml' });
+        res.end(twiml.toString());
+        return;
+      }
 
       if (pathname === '/voice/incoming') {
         this.handleIncomingCall(params, res);
@@ -206,6 +230,43 @@ export class TwilioVoiceChannel implements Channel {
   }
 
   /**
+   * Validate X-Twilio-Signature. Twilio signs the public URL it called, so we
+   * try the URL as seen through the tunnel (Host + X-Forwarded-Proto) and the
+   * configured base URL. Mode `log` records mismatches without rejecting, so a
+   * tunnel/URL mismatch can be spotted before switching to `enforce`.
+   */
+  private checkSignature(
+    req: http.IncomingMessage,
+    url: URL,
+    params: Record<string, string>,
+  ): boolean {
+    if (this.signatureMode === 'off') return true;
+    const signature = req.headers['x-twilio-signature'] as string | undefined;
+    const pathAndQuery = url.pathname + url.search;
+    const proto =
+      (req.headers['x-forwarded-proto'] as string | undefined) || 'https';
+    const candidates = [
+      req.headers.host ? `${proto}://${req.headers.host}${pathAndQuery}` : null,
+      `${this.baseUrl}${pathAndQuery}`,
+    ].filter((u): u is string => !!u);
+    const ok = candidates.some((u) =>
+      verifyTwilioSignature(this.authToken, u, params, signature),
+    );
+    if (ok) return true;
+    logger.warn(
+      {
+        path: url.pathname,
+        mode: this.signatureMode,
+        hasSignature: !!signature,
+        candidates,
+        remote: req.socket.remoteAddress,
+      },
+      'Twilio webhook signature mismatch',
+    );
+    return this.signatureMode !== 'enforce';
+  }
+
+  /**
    * /voice/incoming — Start silent listening.
    */
   private handleIncomingCall(
@@ -217,6 +278,10 @@ export class TwilioVoiceChannel implements Channel {
 
     logger.info({ callSid, from }, 'Incoming voice call');
 
+    const cutoff = Date.now() - TRANSCRIPT_TTL_MS;
+    for (const [sid, t] of transcripts) {
+      if (t.startedAt.getTime() < cutoff) transcripts.delete(sid);
+    }
     transcripts.set(callSid, { entries: [], startedAt: new Date() });
 
     this.onMeta(
@@ -403,6 +468,8 @@ registerChannel('twilio-voice', (opts: ChannelOpts) => {
     'TWILIO_PHONE_NUMBER',
     'TWILIO_WEBHOOK_PORT',
     'TWILIO_WEBHOOK_BASE_URL',
+    'TWILIO_FORWARD_TO_NUMBER',
+    'TWILIO_SIGNATURE_MODE',
   ]);
 
   if (
@@ -437,5 +504,12 @@ registerChannel('twilio-voice', (opts: ChannelOpts) => {
 
   const port = parseInt(env.TWILIO_WEBHOOK_PORT || '3100', 10);
   const baseUrl = env.TWILIO_WEBHOOK_BASE_URL || `http://localhost:${port}`;
-  return new TwilioVoiceChannel(opts, port, baseUrl);
+  const mode = env.TWILIO_SIGNATURE_MODE;
+  const signatureMode: SignatureMode =
+    mode === 'off' || mode === 'enforce' ? mode : 'log';
+  return new TwilioVoiceChannel(opts, port, baseUrl, {
+    authToken: env.TWILIO_AUTH_TOKEN,
+    signatureMode,
+    forwardTo: env.TWILIO_FORWARD_TO_NUMBER,
+  });
 });

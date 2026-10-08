@@ -21,9 +21,9 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/` | Skills loaded inside agent containers (browser, status, formatting) |
 
-## Secrets / Credentials / Proxy (OneCLI)
+## Secrets / Credentials / Proxy
 
-API keys, secret keys, OAuth tokens, and auth credentials are managed by the OneCLI gateway — which handles secret injection into containers at request time, so no keys or tokens are ever passed to containers directly. Run `onecli --help`.
+Credentials live in `.env` on the host and never enter containers. The host runs a credential proxy (`src/credential-proxy.ts`, port `CREDENTIAL_PROXY_PORT`, default 3001); containers get `ANTHROPIC_BASE_URL` pointed at it with a placeholder key, and the proxy injects the real `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` on the way out. Only loopback and container-bridge clients are accepted. Service keys for main-group skills (ElevenLabs, Gemini, Telegram, Maps) are passed via a 0600 `--env-file`, main groups only. OneCLI is not in use here; `/init-onecli` is upstream's alternative.
 
 ## Skills
 
@@ -74,7 +74,7 @@ systemctl --user restart nanoclaw
 
 ## Troubleshooting
 
-**WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` (or `npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp && npm run build`) to install it. Existing auth credentials and groups are preserved.
+**WhatsApp not connecting after upgrade:** WhatsApp is now a separate skill, not bundled in core. Run `/add-whatsapp` to install it. Existing auth credentials and groups are preserved.
 
 ## Container Build Cache
 

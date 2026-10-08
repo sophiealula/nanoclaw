@@ -545,7 +545,9 @@ function buildContainerArgs(
     'GEMINI_MODEL',
     'GOOGLE_MAPS_API_KEY',
   ]);
-  if (Object.keys(serviceEnv).length > 0) {
+  // Only main groups get them: a non-main container holding TELEGRAM_BOT_TOKEN
+  // could message any chat directly, bypassing the IPC authorization checks.
+  if (isMain && Object.keys(serviceEnv).length > 0) {
     args.push('--env-file', writeServiceEnvFile(serviceEnv));
   }
 
